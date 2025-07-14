@@ -1,0 +1,11 @@
+version: "3"
+services:
+  bot:
+    container_name: art-bot-helper
+    command: python main.py
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./:/app
+    restart: unless-stopped
