@@ -18,7 +18,6 @@ class series(str, enum.Enum):
     UmaMusume = "uma"
     ProjectSekai = "pjsk"
     Vocaloid = "voca"
-    testing_only = "test-forum"
 
 class safety_level(str, enum.Enum):
     Art = "art"
