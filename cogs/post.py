@@ -27,6 +27,8 @@ class safety_level(str, enum.Enum):
 
 class group(str, enum.Enum):
     Hololive = "hololive"
+    NIJISANJI = "nijisanji"
+    EONIA = "eonia"
     Independent = "indie"
     
 
