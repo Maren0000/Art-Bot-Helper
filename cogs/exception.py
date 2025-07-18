@@ -21,6 +21,14 @@ class NotPoster(commands.CommandInvokeError):
     """User does not have the poster role."""
     pass
 
+class TooManyArguments(commands.CommandInvokeError):
+    """User has passed in too many arguments into the command."""
+    pass
+
+class TooLittleArguments(commands.CommandInvokeError):
+    """User has passed in too little arguments into the command."""
+    pass
+
 class ExceptionHandler(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot

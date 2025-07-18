@@ -18,6 +18,7 @@ class series(str, enum.Enum):
     UmaMusume = "uma"
     ProjectSekai = "pjsk"
     Vocaloid = "voca"
+    #testingonly = "test-forum"
 
 class safety_level(str, enum.Enum):
     Art = "art"
@@ -79,14 +80,13 @@ class PostingCog(commands.Cog):
             raise(AccessDenied("access denied"))
         
         # Finding Character threads
-        
-        charas = characters.lower().split(",")
+        charas = characters.lower().replace("_", " ").split(",")
         threads = []
         for thread in forum_channel.threads:
             if thread.name == "All Characters":
                 threads.append(thread)
 
-            if thread.name.lower().replace(" ", "_") in charas:
+            if thread.name.lower() in charas:
                 threads.append(thread)
 
             if len(threads) == len(charas)+1:
@@ -98,10 +98,18 @@ class PostingCog(commands.Cog):
         # Check if valid link and replace
         link = link_check_and_convert(link)
 
-        msg = "Successfully posted in " + forum_channel.name + " and following threads:\n"
-        msg += await send_link_to_threads(ctx, threads, link)
+        thread_links = await send_link_to_threads(ctx, threads, link)
         
-        await ctx.send(msg)
+        embed = discord.Embed(
+        title=f"Successfully posted!",
+        description="Your art has been posted in " + forum_channel.jump_url,
+        color=discord.Color.green(),
+        timestamp=datetime.datetime.utcnow()
+        )
+
+        embed.add_field(name="Threads & Links", value=thread_links)
+
+        await ctx.send(embed=embed)
     
     @gacha.error
     async def posting_error(self, ctx: commands.Context, error: commands.CommandError):
@@ -114,7 +122,7 @@ class PostingCog(commands.Cog):
         print(error)
         print(type(error))
         if isinstance(error, commands.MissingRequiredArgument):
-            embed.description = "Command format is incorrect! Please format the command as `!post gacha {series} {safety_level} {chara1,chara2} {link}`"
+            embed.description = "Command format is incorrect! Please format the command as `/post gacha {series} {safety_level} {chara1,chara2} {link}`"
             embed.add_field(name="Python error", value=str(error))
         elif isinstance(error, commands.BadArgument):
             embed.description = "Incorrect argument! Check if the {series} and {safety_level} are correct."
@@ -166,7 +174,7 @@ class PostingCog(commands.Cog):
         if ctx.author not in forum_channel.members:
             raise(AccessDenied("access denied"))
             
-        charas = characters.lower().split(",")
+        charas = characters.lower().replace("_", " ").split(",")
         threads = []
         for thread in forum_channel.threads:
             if thread.name == "All Characters":
@@ -175,7 +183,7 @@ class PostingCog(commands.Cog):
             if thread.name.lower() == group.value.lower()+" (group)":
                 threads.append(thread)
 
-            if thread.name.lower().replace(" ", "_") in charas:
+            if thread.name.lower() in charas:
                 threads.append(thread)
         
         if len(threads) != len(charas)+2:
@@ -184,10 +192,18 @@ class PostingCog(commands.Cog):
         # Check if valid link and replace
         link = link_check_and_convert(link)
         
-        msg = "Successfully posted in " + forum_channel.name + " and following threads:\n"
-        msg += await send_link_to_threads(ctx, threads, link)
+        thread_links = "Successfully posted in " + forum_channel.name + " and following threads:\n"
         
-        await ctx.send(msg)
+        embed = discord.Embed(
+        title=f"Successfully posted!",
+        description="Your art has been posted in " + forum_channel.jump_url,
+        color=discord.Color.green(),
+        timestamp=datetime.datetime.utcnow()
+        )
+        
+        embed.add_field(name="Threads & Links", value=thread_links)
+
+        await ctx.send(embed=embed)
 
     @vtub.error
     async def vtub_error(self, ctx: commands.Context, error: commands.CommandError):
@@ -198,7 +214,7 @@ class PostingCog(commands.Cog):
         timestamp=datetime.datetime.utcnow()
         )
         if isinstance(error, commands.MissingRequiredArgument):
-            embed.description = "Command format is incorrect! Please format the command as `!post vtub {group} {safety_level} {chara1,chara2} {link}`"
+            embed.description = "Command format is incorrect! Please format the command as `/post vtub {group} {safety_level} {chara1,chara2} {link}`"
             embed.add_field(name="Python error", value=str(error))
         elif isinstance(error, commands.BadArgument):
             embed.description = "Incorrect Argument! Check if the {group} and {safety_level} are correct."
@@ -221,11 +237,10 @@ class PostingCog(commands.Cog):
     @post.command()
     async def help(self, ctx: commands.Context):
         """
-        Information about how to use the Bot's help commands.
+        Information about how to use the Bot's post commands.
         """
         embed=discord.Embed(title="How to post using the bot",
-                            description=("This bot supports using both classic prefix commands (!post) and the newer slash commands (/post)."
-                                "\nIt's recommened to use the slash commands system since it supports autofill for some sections, while prefix requries manual typing for all arguments."),
+                            description=("This bot supports using the newer slash commands (/post)."),
                             color=discord.Color.yellow())
         embed.add_field(name="/post gacha", value=("Command for posting to gacha channels (and vocaloid)"
                         "\nSyntax: `/post gacha {series} {safety_level} {characters} {link}`"
@@ -239,14 +254,12 @@ class PostingCog(commands.Cog):
                         "\n`{Link}`: Check \"{Link}\" section."), inline=False)
         embed.add_field(name="{characters}", value=("List of characters in the image. Case-insensitive."
                         "\nTo include multiple characters, write each name split by commas (Ex: `noa,yuuka`)."
-                        "\nIf the character thread has a space in it, be sure to replace with an underscore (Ex: `rice_shower`)"), inline=False)
+                        "\nYou don't need to worry about spaces in the character name if you are using slash commands."), inline=False)
         embed.add_field(name="{Link}", value=("Both Twitter and Pixiv links are supported. Be sure to use the ORIGINAL links when posting. Do not edit the domain."
                         "\nFor Pixiv links, the bot will automatically use `phixiv` for embeds. If the post has multiple images, you can select a different image by adding `/{number}` at the end. (Ex: `https://www.pixiv.net/en/artworks/83319118/2` for 2nd image)"
                         "\nFor Twitter links, the bot will automatically use `fxtwitter` for embeds."), inline=False)
-        embed.add_field(name="Using prefix versions of the commands", value=("Very similar to the slash command versions. The only difference is that {series}/{group} and {safety_level} will need to be filled in manually."
-                        "\nUse the channel name as a guide for both"
-                        "\nExample: `!post gacha genshin art keqing,ganyu {link}`"), inline=False)
         await ctx.send(embed=embed)
+    
     @post.command()
     async def anime(self, ctx: commands.Context):
         """
@@ -299,11 +312,12 @@ def link_check_and_convert(link: str) -> str:
 async def send_link_to_threads(ctx: commands.Context, threads: list, link: str) -> str:
     msg = ""
     for thread in threads:
+        post = await thread.send("Poster: "+ ctx.author.name + "\n" + link)
         if thread == threads[len(threads)-1]:
-            msg += thread.name
+            print(post.jump_url)
+            msg += "- " + post.jump_url
         else:
-            msg += thread.name + " - "
-        await thread.send("Poster: "+ ctx.author.name + "\n" + link)
+            msg += "- " + post.jump_url + "\n"
 
     return msg
 
