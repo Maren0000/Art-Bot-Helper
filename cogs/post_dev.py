@@ -5,19 +5,8 @@ from cogs.exception import ForumNotFound, ThreadsNotFound, AccessDenied, Invalid
 import enum
 
 class series(str, enum.Enum):
-    GenshinImpact = "genshin"
-    HonkaiStarRail = "hsr"
-    HonkaiImpact3rd = "hi3"
-    ZenlessZoneZero = "zzz"
-    BlueArchive = "ba"
-    Arknights = "ark"
-    AzurLane = "azur"
-    NIKKE = "nikke"
-    WutheringWaves = "wuwa"
-    Snowbreak = "sb"
-    UmaMusume = "uma"
-    ProjectSekai = "pjsk"
-    Vocaloid = "voca"
+    testingonly = "test-forum"
+    donotuse = "fake"
 
 class safety_level(str, enum.Enum):
     Art = "art"
@@ -26,12 +15,10 @@ class safety_level(str, enum.Enum):
 
 class group(str, enum.Enum):
     Hololive = "hololive"
-    NIJISANJI = "nijisanji"
-    EONIA = "eonia"
-    Independent = "indie"
+    donotuse = "fake"
     
 
-class PostingCog(commands.Cog):
+class PostingDevCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
     @commands.hybrid_group(name="post")
@@ -42,7 +29,7 @@ class PostingCog(commands.Cog):
         #print(ctx.invoked_subcommand)
         if ctx.invoked_subcommand is None:
            await ctx.send("Avaliable groups: gacha - vtub - anime")
-
+    
     @post.command()
     async def gacha(self, ctx: commands.Context, series: series, safety_level: safety_level, characters: str, link: str):
         """
@@ -130,6 +117,8 @@ class PostingCog(commands.Cog):
         color=discord.Color.red(),
         timestamp=datetime.datetime.utcnow()
         )
+        print(error)
+        print(type(error))
         if isinstance(error, commands.MissingRequiredArgument):
             embed.description = "Command format is incorrect! Please format the command as `/post gacha {series} {safety_level} {chara1,chara2} {link}`"
             embed.add_field(name="Python error", value=str(error))
@@ -177,7 +166,7 @@ class PostingCog(commands.Cog):
             raise(NotPoster("not a poster"))
         
         for channel in ctx.guild.channels:
-            if channel.name == "vtub"+"-"+safety_level.value:
+            if channel.name == "test-forum"+"-"+safety_level.value:
                 forum_channel = channel
         if not forum_channel:
             raise(ForumNotFound("forum not found"))
@@ -346,4 +335,4 @@ async def send_link_to_threads(ctx: commands.Context, threads: list, link: str) 
     return msg
 
 async def setup(bot):
-    await bot.add_cog(PostingCog(bot))
+    await bot.add_cog(PostingDevCog(bot))

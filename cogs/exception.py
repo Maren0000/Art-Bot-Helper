@@ -13,6 +13,10 @@ class ThreadsNotFound(commands.CommandInvokeError):
     """Thread channels could not be found."""
     pass
 
+class ThreadAlreadyExists(commands.CommandInvokeError):
+    """User has tried to create a thread that already exists."""
+    pass
+
 class AccessDenied(commands.CommandInvokeError):
     """User does not have access to the channel."""
     pass

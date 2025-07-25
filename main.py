@@ -27,11 +27,18 @@ class CustomBot(commands.Bot):
             return
         for filename in os.listdir(self.ext_dir):
             if filename.endswith(".py") and not filename.startswith("_"):
-                try:
-                    await self.load_extension(f"{self.ext_dir}.{filename[:-3]}")
-                    self.logger.info(f"Loaded extension {filename[:-3]}")
-                except commands.ExtensionError:
-                    self.logger.error(f"Failed to load extension {filename[:-3]}\n{traceback.format_exc()}")
+                if os.getenv("MODE") == "DEV" and ("_dev.py" in filename or "sync" in filename):
+                    try:
+                        await self.load_extension(f"{self.ext_dir}.{filename[:-3]}")
+                        self.logger.info(f"Loaded extension {filename[:-3]}")
+                    except commands.ExtensionError:
+                        self.logger.error(f"Failed to load extension {filename[:-3]}\n{traceback.format_exc()}")
+                elif os.getenv("MODE") == "PROD" and not "_dev.py" in filename:
+                    try:
+                        await self.load_extension(f"{self.ext_dir}.{filename[:-3]}")
+                        self.logger.info(f"Loaded extension {filename[:-3]}")
+                    except commands.ExtensionError:
+                        self.logger.error(f"Failed to load extension {filename[:-3]}\n{traceback.format_exc()}")
 
     async def on_error(self, event_method: str, *args: typing.Any, **kwargs: typing.Any) -> None:
         self.logger.error(f"An error occurred in {event_method}.\n{traceback.format_exc()}")

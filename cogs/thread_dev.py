@@ -2,26 +2,14 @@ import datetime
 import discord
 import enum
 from discord.ext import commands
-from cogs.post import series, safety_level
+from cogs.post import safety_level
 from cogs.exception import NotPoster, ForumNotFound, AccessDenied, ThreadsNotFound, TooManyArguments, TooLittleArguments, ThreadAlreadyExists
 
 class forum_series(str, enum.Enum):
-    GenshinImpact = "genshin"
-    HonkaiStarRail = "hsr"
-    HonkaiImpact3rd = "hi3"
-    ZenlessZoneZero = "zzz"
-    BlueArchive = "ba"
-    Arknights = "ark"
-    AzurLane = "azur"
-    NIKKE = "nikke"
-    WutheringWaves = "wuwa"
-    Snowbreak = "sb"
-    UmaMusume = "uma"
-    ProjectSekai = "pjsk"
-    Vocaloid = "voca"
-    VTuber = "vtub"
+    testingonly = "test-forum"
+    donotuse = "fake"
 
-class ThreadCog(commands.Cog):
+class ThreadDevCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
@@ -284,4 +272,4 @@ class ThreadCog(commands.Cog):
         await ctx.send(embed=embed)
 
 async def setup(bot):
-    await bot.add_cog(ThreadCog(bot))
+    await bot.add_cog(ThreadDevCog(bot))
