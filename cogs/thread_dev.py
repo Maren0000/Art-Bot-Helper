@@ -258,14 +258,16 @@ class ThreadDevCog(commands.Cog):
                             description=("This bot supports using the newer slash commands (/thread)."),
                             color=discord.Color.yellow())
         embed.add_field(name="/thread create", value=("Command for create threads in the art forum channels."
-                        "\nSyntax: `/thread create {channel} {name} {embed_link} {image_file}`"
-                        "\n`{channel}`: Pick from the available list. It must be a forum channel"
+                        "\nSyntax: `/thread create {series} {safety_level} {name} {embed_link} {image_file}`"
+                        "\n`{series} and {safety_level}`: Pick from the available lists. This will help select the forum channel to create a thread in."
                         "\n`{name}`: Name of the new thread. Note that this is **CASE-SENSITIVE** so please try to use the correct official name with proper casing and spaces."
                         "\n`{embed_link}`: URL to an image for the embed preview. Use this or the option below."
                         "\n`{image_file}`: Image attachment for the embed preview. Use this or the option above."), inline=False)
-        embed.add_field(name="/thread edit", value=("Command for editing the embed preview on existing threads."
-                        "\nSyntax: `/thread edit {channel} {name} {embed_link} {image_file}`"
-                        "\nThis is pretty much the exact same syntax as `create` with the only difference being that the name is case-insensitive."), inline=False)
+        embed.add_field(name="/thread edit", value=("Command for editing the thread name or embed preview on existing threads."
+                        "\nSyntax: `/thread edit {series} {safety_level} {name} {new_name} {embed_link} {image_file}`"
+                        "\nThis command has very similar syntax to `create` with the main difference being that the name is case-insensitive."
+                        "\n**But** {new_name} will be **CASE-SENSITIVE** so please keep that in mind if you are renaming a thread."
+                        "\nYou can both rename a thread and edit the embed image at the same time."), inline=False)
         embed.add_field(name="Thread Image Guidelines", value=("For the main thread images, you usually want to use landscape images more than portrait images as those will look better with Discord's forum previews."
                         "\nWhile both official art and fanart are allowed, generally, it's better to pick official art so that each post has a consistent preview style. A good place to look for such official images are fan wikis."
                         '\nFor "All Characters" threads, try to pick an image that has as many characters from the game as possbile. A good example of this is official wallpaper art. If you can\'t find something like that, then use the game\'s logo.'), inline=False)
