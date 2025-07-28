@@ -264,15 +264,17 @@ class PostingDevCog(commands.Cog):
                             description=("This bot supports using the newer slash commands (/post)."),
                             color=discord.Color.yellow())
         embed.add_field(name="/post gacha", value=("Command for posting to gacha channels (and vocaloid)"
-                        "\nSyntax: `/post gacha {series} {safety_level} {characters} {link} {}`"
+                        "\nSyntax: `/post gacha {series} {safety_level} {characters} {link} {image_num}`"
                         "\n`{series}` and `{safety_level}`: Pick from the available list."
                         "\n`{characters}`: Check \"{characters}\" section."
-                        "\n`{Link}`: Check \"{Link}\" section."), inline=False)
+                        "\n`{Link}`: Check \"{Link}\" section."
+                        "\n`{image_num}`: Check \"{image_num}\" section."), inline=False)
         embed.add_field(name="/post vtub", value=("Command for posting to vtuber channels"
-                        "\nSyntax: `/post vtub {group} {safety_level} {characters} {link}`"
+                        "\nSyntax: `/post vtub {group} {safety_level} {characters} {link} {image_num}`"
                         "\n`{group}` and `{safety_level}`: Pick from the available list."
                         "\n`{characters}`: Check \"{characters}\" section."
-                        "\n`{Link}`: Check \"{Link}\" section."), inline=False)
+                        "\n`{Link}`: Check \"{Link}\" section."
+                        "\n`{image_num}`: Check \"{image_num}\" section."), inline=False)
         embed.add_field(name="{characters}", value=("List of characters in the image. Case-insensitive."
                         "\nTo include multiple characters, write each name split by commas (Ex: `noa,yuuka`)."
                         "\nYou don't need to worry about spaces in the character name if you are using slash commands."), inline=False)
