@@ -291,6 +291,8 @@ class PostingCog(commands.Cog):
                         "\nYou don't need to worry about spaces in the character name if you are using slash commands."), inline=False)
         embed.add_field(name="{Link}", value=("Both Twitter and Pixiv links are supported. Be sure to use the ORIGINAL links when posting. Do not edit the domain."
                         "\nThe bot will download and upload the selected image as a new embed"), inline=False)
+        embed.add_field(name="{image_num}", value=("This is an optional argument. Use it for when a post has multiple images and you want to select a specific one."
+                        "\nMust be a number (Ex. 2 for 2nd image in the post)."), inline=False)
         await ctx.send(embed=embed)
     
     @post.command()

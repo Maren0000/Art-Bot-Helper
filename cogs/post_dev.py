@@ -264,7 +264,7 @@ class PostingDevCog(commands.Cog):
                             description=("This bot supports using the newer slash commands (/post)."),
                             color=discord.Color.yellow())
         embed.add_field(name="/post gacha", value=("Command for posting to gacha channels (and vocaloid)"
-                        "\nSyntax: `/post gacha {series} {safety_level} {characters} {link}`"
+                        "\nSyntax: `/post gacha {series} {safety_level} {characters} {link} {}`"
                         "\n`{series}` and `{safety_level}`: Pick from the available list."
                         "\n`{characters}`: Check \"{characters}\" section."
                         "\n`{Link}`: Check \"{Link}\" section."), inline=False)
@@ -277,7 +277,9 @@ class PostingDevCog(commands.Cog):
                         "\nTo include multiple characters, write each name split by commas (Ex: `noa,yuuka`)."
                         "\nYou don't need to worry about spaces in the character name if you are using slash commands."), inline=False)
         embed.add_field(name="{Link}", value=("Both Twitter and Pixiv links are supported. Be sure to use the ORIGINAL links when posting. Do not edit the domain."
-                        "\nThe bot will download and upload the selected image as a new embed"), inline=False)
+                        "\nThe bot will download and upload the selected image as a new embed."), inline=False)
+        embed.add_field(name="{image_num}", value=("This is an optional argument. Use it for when a post has multiple images and you want to select a specific one."
+                        "\nMust be a number (Ex. 2 for 2nd image in the post)."), inline=False)
         await ctx.send(embed=embed)
     
     @post.command()
