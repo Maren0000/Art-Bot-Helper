@@ -1,8 +1,10 @@
 from discord.ext import commands
 import discord
 import datetime
-from cogs.exception import ForumNotFound, ThreadsNotFound, AccessDenied, InvalidLink, NotPoster
+import exception
 import enum
+import json
+import io
 
 class series(str, enum.Enum):
     GenshinImpact = "genshin"
@@ -44,7 +46,7 @@ class PostingCog(commands.Cog):
            await ctx.send("Avaliable groups: gacha - vtub - anime")
 
     @post.command()
-    async def gacha(self, ctx: commands.Context, series: series, safety_level: safety_level, characters: str, link: str):
+    async def gacha(self, ctx: commands.Context, series: series, safety_level: safety_level, characters: str, link: str, image_num: int | None = None):
         """
         Post art to one of the gacha game forums (or vocaloid forums)
 
@@ -61,12 +63,13 @@ class PostingCog(commands.Cog):
         link: str
             Pixiv or Twitter link to image.
         """
+        await ctx.defer()
         # Get rid of whitespace at start and end
         characters = characters.strip()
 
         role_check = ctx.author.get_role(1393719753264201802)
         if not role_check:
-            raise(NotPoster("not a poster"))
+            raise(exception.NotPoster("not a poster"))
         
         # Finding forum channel
         for channel in ctx.guild.channels:
@@ -74,15 +77,15 @@ class PostingCog(commands.Cog):
                 forum_channel = channel
                 break
         if not forum_channel:
-            raise(ForumNotFound("forum not found"))
+            raise(exception.ForumNotFound("forum not found"))
             
         
         # Verifying if poster has access to channel
         if ctx.author not in forum_channel.members:
-            raise(AccessDenied("access denied"))
+            raise(exception.AccessDenied("access denied"))
         
         # Finding Character threads
-        charas = characters.lower().replace("_", " ").split(",")
+        charas = characters.lower().replace("_", " ").strip().split(",")
         threads = []
         thread_names = []
         for thread in forum_channel.threads:
@@ -104,18 +107,16 @@ class PostingCog(commands.Cog):
             for chara_name in charas:
                 if chara_name not in thread_names:
                     missing_threads += "- "+chara_name+"\n"
-            raise(ThreadsNotFound(missing_threads))
+            raise(exception.ThreadsNotFound(missing_threads))
         
         # Check if valid link and replace
-        link = link_check_and_convert(link)
-
-        thread_links = await send_link_to_threads(ctx, threads, link)
+        thread_links = await self.link_check_and_send(link, threads, ctx.author, image_num)
         
         embed = discord.Embed(
         title=f"Successfully posted!",
         description="Your art has been posted in " + forum_channel.jump_url,
         color=discord.Color.green(),
-        timestamp=datetime.datetime.utcnow()
+        timestamp=datetime.datetime.now()
         )
 
         embed.add_field(name="Threads & Links", value=thread_links)
@@ -128,31 +129,37 @@ class PostingCog(commands.Cog):
         title=f"Error in command {ctx.command}!",
         description="Unknown error occurred while using the command",
         color=discord.Color.red(),
-        timestamp=datetime.datetime.utcnow()
+        timestamp=datetime.datetime.now()
         )
+        print(error)
+        print(type(error))
         if isinstance(error, commands.MissingRequiredArgument):
             embed.description = "Command format is incorrect! Please format the command as `/post gacha {series} {safety_level} {chara1,chara2} {link}`"
             embed.add_field(name="Python error", value=str(error))
         elif isinstance(error, commands.BadArgument):
             embed.description = "Incorrect argument! Check if the {series} and {safety_level} are correct."
             embed.add_field(name="Python error", value=str(error))
-        elif isinstance(error, InvalidLink):
+        elif isinstance(error, exception.InvalidLink):
             embed.description = "Invalid link! Please check {link} argument\nSupported Sites:\n\
                            - Pixiv (<https://www.pixiv.net>)\n- Twitter (<https://twitter.com> or <https://x.com>)"
-        elif isinstance(error, ForumNotFound):
+        elif isinstance(error, exception.ForumNotFound):
             embed.description = "Could not find correct forum channel! Check that {series} and {safety_level} is correct."
-        elif isinstance(error, AccessDenied):
+        elif isinstance(error, exception.AccessDenied):
             embed.description = "You do not have access to the channel you are trying to post to!"
-        elif isinstance(error, ThreadsNotFound):
+        elif isinstance(error, exception.ThreadsNotFound):
             embed.description = "Could not find all character threads!\nMissing threads:\n" + str(error).lstrip("Command raised an exception: str: ")
-        elif isinstance(error, NotPoster):
+        elif isinstance(error, exception.NotPoster):
             embed.description = "You aren't allowed to post art!"
+        elif isinstance(error, exception.RequestFailed):
+            embed.description = "The bot has failed to contact an external server. Please try again or ping Maren about this issue."
+        elif isinstance(error, exception.AIImageFound):
+            embed.description = "The artist has labeled that this image has been AI assisted. As such, it cannot be added to this server."
         else:
             embed.add_field(name="Python error", value=str(error))
         await ctx.send(embed=embed)
     
     @post.command()
-    async def vtub(self, ctx: commands.Context, group: group, safety_level: safety_level, characters: str, link: str):
+    async def vtub(self, ctx: commands.Context, group: group, safety_level: safety_level, characters: str, link: str, image_num: int | None = None):
         """
         Post art to the V-Tuber forums.
 
@@ -169,22 +176,23 @@ class PostingCog(commands.Cog):
         link: str
             Pixiv or Twitter link to image.
         """
+        await ctx.defer()
         # Get rid of whitespace at start and end
         characters = characters.strip()
 
         role_check = ctx.author.get_role(1393719753264201802)
         if not role_check:
-            raise(NotPoster("not a poster"))
+            raise(exception.NotPoster("not a poster"))
         
         for channel in ctx.guild.channels:
-            if channel.name == "vtub"+"-"+safety_level.value:
+            if channel.name == "test-forum"+"-"+safety_level.value:
                 forum_channel = channel
         if not forum_channel:
-            raise(ForumNotFound("forum not found"))
+            raise(exception.ForumNotFound("forum not found"))
         
         # Verifying if poster has access to channel
         if ctx.author not in forum_channel.members:
-            raise(AccessDenied("access denied"))
+            raise(exception.AccessDenied("access denied"))
             
         charas = characters.lower().replace("_", " ").split(",")
         threads = []
@@ -194,9 +202,9 @@ class PostingCog(commands.Cog):
                 threads.append(thread)
                 thread_names.append("All Characters")
 
-            if thread.name.lower() == group.value.lower()+" (group)":
+            if group.value != "indie" and thread.name.lower() == group.value.lower().strip()+" (group)":
                 threads.append(thread)
-                thread_names.append(group.value.lower())
+                thread_names.append(group.value.lower().strip())
 
             if thread.name.lower() in charas:
                 threads.append(thread)
@@ -211,18 +219,16 @@ class PostingCog(commands.Cog):
             for chara_name in charas:
                 if chara_name not in thread_names:
                     missing_threads += "- "+chara_name+"\n"
-            raise(ThreadsNotFound(missing_threads))
+            raise(exception.ThreadsNotFound(missing_threads))
         
         # Check if valid link and replace
-        link = link_check_and_convert(link)
-        
-        thread_links = await send_link_to_threads(ctx, threads, link)
+        thread_links = await self.link_check_and_send(link, threads, ctx.author, image_num)
         
         embed = discord.Embed(
         title=f"Successfully posted!",
         description="Your art has been posted in " + forum_channel.jump_url,
         color=discord.Color.green(),
-        timestamp=datetime.datetime.utcnow()
+        timestamp=datetime.datetime.now()
         )
         
         embed.add_field(name="Threads & Links", value=thread_links)
@@ -235,7 +241,7 @@ class PostingCog(commands.Cog):
         title=f"Error in command {ctx.command}!",
         description="Unknown error occurred while using the command",
         color=discord.Color.red(),
-        timestamp=datetime.datetime.utcnow()
+        timestamp=datetime.datetime.now()
         )
         if isinstance(error, commands.MissingRequiredArgument):
             embed.description = "Command format is incorrect! Please format the command as `/post vtub {group} {safety_level} {chara1,chara2} {link}`"
@@ -243,17 +249,21 @@ class PostingCog(commands.Cog):
         elif isinstance(error, commands.BadArgument):
             embed.description = "Incorrect Argument! Check if the {group} and {safety_level} are correct."
             embed.add_field(name="Python error", value=str(error))
-        elif isinstance(error, InvalidLink):
+        elif isinstance(error, exception.InvalidLink):
             embed.description = "Invalid link! Please check {link} argument\nSupported Sites:\n\
                            - Pixiv (<https://www.pixiv.net>)\n- Twitter (<https://twitter.com> or <https://x.com>)"
-        elif isinstance(error, ForumNotFound):
+        elif isinstance(error, exception.ForumNotFound):
             embed.description = "Could not find correct forum channel! Check that {group} and {safety_level} is correct."
-        elif isinstance(error, AccessDenied):
+        elif isinstance(error, exception.AccessDenied):
             embed.description = "You do not have access to the channel you are trying to post to!"
-        elif isinstance(error, ThreadsNotFound):
+        elif isinstance(error, exception.ThreadsNotFound):
             embed.description = "Could not find all character threads!\nMissing threads:\n" + str(error).lstrip("Command raised an exception: str: ")
-        elif isinstance(error, NotPoster):
+        elif isinstance(error, exception.NotPoster):
             embed.description = "You aren't allowed to post art!"
+        elif isinstance(error, exception.RequestFailed):
+            embed.description = "The bot has failed to contact an external server. Please try again or ping Maren about this issue."
+        elif isinstance(error, exception.AIImageFound):
+            embed.description = "The artist has labeled that this image has been AI assisted. As such, it cannot be added to this server."
         else:
             embed.add_field(name="Python error", value=str(error))
         await ctx.send(embed=embed)
@@ -280,8 +290,7 @@ class PostingCog(commands.Cog):
                         "\nTo include multiple characters, write each name split by commas (Ex: `noa,yuuka`)."
                         "\nYou don't need to worry about spaces in the character name if you are using slash commands."), inline=False)
         embed.add_field(name="{Link}", value=("Both Twitter and Pixiv links are supported. Be sure to use the ORIGINAL links when posting. Do not edit the domain."
-                        "\nFor Pixiv links, the bot will automatically use `phixiv` for embeds. If the post has multiple images, you can select a different image by adding `/{number}` at the end. (Ex: `https://www.pixiv.net/en/artworks/83319118/2` for 2nd image)"
-                        "\nFor Twitter links, the bot will automatically use `fxtwitter` for embeds."), inline=False)
+                        "\nThe bot will download and upload the selected image as a new embed"), inline=False)
         await ctx.send(embed=embed)
     
     @post.command()
@@ -322,28 +331,73 @@ class PostingCog(commands.Cog):
         
         await ctx.send(msg)'''
 
-def link_check_and_convert(link: str) -> str:
-    if not link.startswith("https://www.pixiv.net") and not link.startswith("https://twitter.com") and not link.startswith("https://x.com"):
-        raise InvalidLink("Invalid Link!")
-    if link.startswith("https://www.pixiv.net"):
-        link = link.replace("pixiv", "phixiv")
-    if link.startswith("https://twitter.com"):
-        link = link.replace("twitter", "fxtwitter")
-    if link.startswith("https://x.com"):
-        link = link.replace("x", "fxtwitter")
-    return link
+    async def link_check_and_send(self, link: str, threads: list, author, image_num: int | None = None) -> str:
+        msg = ""
+        if not link.startswith("https://www.pixiv.net") and not link.startswith("https://twitter.com") and not link.startswith("https://x.com"):
+            raise exception.InvalidLink("Invalid Link!")
+        if link.startswith("https://www.pixiv.net"):
+            temp = link.split("/")
+            id = temp[len(temp)-1].split("?", 1)[0]
+            resp = await self.bot.client.get("https://www.pixiv.net/ajax/illust/"+id)
+            if resp.status == 200:
+                json_resp = json.loads(await resp.text())
+                if json_resp['body']['aiType'] > 1:
+                    raise exception.AIImageFound("pixiv ai image")
+                image_link = json_resp['body']['urls']['original']
+                temp = json_resp['body']['urls']['original'].split("/")
+                image_name = temp[len(temp)-1]
+                if image_num:
+                    extension = image_link[-4:]
+                    image_link = image_link[:len(image_link)-5]
+                    image_link += str(image_num-1)+extension
+                image_req = await self.bot.client.get(image_link)
+                if image_req.status == 200:
+                    image = await image_req.read()
+                    embed_title = json_resp['body']["title"]
+                    embed_url = json_resp['body']["extraData"]["meta"]["canonical"]
+                    embed_author_name = "@"+ json_resp['body']['userName']
+                    embed_author_url = "https://www.pixiv.net/users/" + json_resp['body']["userId"]
+                else:
+                    raise exception.RequestFailed("request to pixiv image failed")
+            else:
+                raise exception.RequestFailed("request to pixiv ajax failed")
+        elif link.startswith("https://twitter.com") or link.startswith("https://x.com"):
+            temp = link.split("/")
+            id = temp[len(temp)-1].split("?", 1)[0]
+            tweet = await self.bot.twitterClient.get_tweet_by_id(id)
+            image_link = tweet.media[0].media_url
+            if image_num:
+                image_link = tweet.media[image_num-1].media_url
+            image_req = await self.bot.client.get(image_link)
+            temp = tweet.media[0].media_url.split("/")
+            image_name = temp[len(temp)-1]
+            if image_req.status == 200:
+                image = await image_req.read()
+                embed_title = "Tweet"
+                embed_url = link
+                embed_author_name = tweet.user.name
+                embed_author_url = "https://twitter.com/" +tweet.user.screen_name
+            else:
+                raise exception.RequestFailed("request to twitter image failed")
+        
+        embed = discord.Embed(
+        title=embed_title,
+        url=embed_url,
+        color=discord.Color.purple(),
+        timestamp=datetime.datetime.now()
+        )
+        embed.set_author(name=embed_author_name, url=embed_author_url)
+        embed.add_field(name="Original Poster", value=author.name, inline=False)
+        embed.set_image(url="attachment://"+image_name)
+        embed.set_footer(text="Maren's Art Bot Services")
 
-async def send_link_to_threads(ctx: commands.Context, threads: list, link: str) -> str:
-    msg = ""
-    for thread in threads:
-        post = await thread.send("Poster: "+ ctx.author.name + "\n" + link)
-        if thread == threads[len(threads)-1]:
-            print(post.jump_url)
-            msg += "- " + post.jump_url
-        else:
-            msg += "- " + post.jump_url + "\n"
-
-    return msg
+        for thread in threads:
+            post = await thread.send(embed=embed, file=discord.File(io.BytesIO(image),filename=image_name))
+            if thread == threads[len(threads)-1]:
+                msg += "- " + post.jump_url
+            else:
+                msg += "- " + post.jump_url + "\n"
+        return msg
 
 async def setup(bot):
     await bot.add_cog(PostingCog(bot))

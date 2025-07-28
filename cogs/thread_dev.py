@@ -3,7 +3,7 @@ import discord
 import enum
 from discord.ext import commands
 from cogs.post import safety_level
-from cogs.exception import NotPoster, ForumNotFound, AccessDenied, ThreadsNotFound, TooManyArguments, TooLittleArguments, ThreadAlreadyExists
+from exception import NotPoster, ForumNotFound, AccessDenied, ThreadsNotFound, TooManyArguments, TooLittleArguments, ThreadAlreadyExists
 
 class forum_series(str, enum.Enum):
     testingonly = "test-forum"
