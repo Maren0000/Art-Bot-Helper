@@ -5,6 +5,8 @@ import datetime
 import exception
 import enum
 import json
+import zipfile
+from PIL import Image
 
 class series(str, enum.Enum):
     testingonly = "test-forum"
@@ -279,7 +281,7 @@ class PostingDevCog(commands.Cog):
                         "\nTo include multiple characters, write each name split by commas (Ex: `noa,yuuka`)."
                         "\nYou don't need to worry about spaces in the character name if you are using slash commands."), inline=False)
         embed.add_field(name="{Link}", value=("Both Twitter and Pixiv links are supported. Be sure to use the ORIGINAL links when posting. Do not edit the domain."
-                        "\nThe bot will download and upload the selected image as a new embed."), inline=False)
+                        "\nThe bot will download and upload the selected image as a new embed if allowed by the server upload limit. Otherwise, an external embed service (like Phixiv) will be used."), inline=False)
         embed.add_field(name="{image_num}", value=("This is an optional argument. Use it for when a post has multiple images and you want to select a specific one."
                         "\nMust be a number (Ex. 2 for 2nd image in the post)."), inline=False)
         await ctx.send(embed=embed)
@@ -324,6 +326,7 @@ class PostingDevCog(commands.Cog):
 
     async def link_check_and_send(self, link: str, threads: list, author, image_num: int | None = None) -> str:
         msg = ""
+        phixiv_fallback = False
         if not link.startswith("https://www.pixiv.net") and not link.startswith("https://twitter.com") and not link.startswith("https://x.com"):
             raise exception.InvalidLink("Invalid Link!")
         if link.startswith("https://www.pixiv.net"):
@@ -334,22 +337,61 @@ class PostingDevCog(commands.Cog):
                 json_resp = json.loads(await resp.text())
                 if json_resp['body']['aiType'] > 1:
                     raise exception.AIImageFound("pixiv ai image")
-                image_link = json_resp['body']['urls']['original']
-                temp = json_resp['body']['urls']['original'].split("/")
-                image_name = temp[len(temp)-1]
-                if image_num:
-                    extension = image_link[-4:]
-                    image_link = image_link[:len(image_link)-5]
-                    image_link += str(image_num-1)+extension
-                image_req = await self.bot.client.get(image_link)
-                if image_req.status == 200:
-                    image = await image_req.read()
-                    embed_title = json_resp['body']["title"]
-                    embed_url = json_resp['body']["extraData"]["meta"]["canonical"]
-                    embed_author_name = "@"+ json_resp['body']['userName']
-                    embed_author_url = "https://www.pixiv.net/users/" + json_resp['body']["userId"]
-                else:
-                    raise exception.RequestFailed("request to pixiv image failed")
+                if json_resp['body']["illustType"] != 2:
+                    image_link = json_resp['body']['urls']['original']
+                    temp = json_resp['body']['urls']['original'].split("/")
+                    image_name = temp[len(temp)-1]
+                    if image_num:
+                        extension = image_link[-4:]
+                        image_link = image_link[:len(image_link)-5]
+                        image_link += str(image_num-1)+extension
+                    image_req = await self.bot.client.get(image_link)
+                    if image_req.status == 200:
+                        if int(image_req.headers['Content-Length']) > 10485759: # Temp because non-boosted servers only get 10MB upload
+                            phixiv_fallback = True
+                        else:
+                            image = await image_req.read()
+                    else:
+                        raise exception.RequestFailed("request to pixiv image failed")
+                else: # Ugoria video
+                    ugo_resp = await self.bot.client.get("https://www.pixiv.net/ajax/illust/"+id+"/ugoira_meta")
+                    if resp.status == 200:
+                        ugo_json_resp = json.loads(await ugo_resp.text())
+                        ugo_zip_resp = await self.bot.client.get(ugo_json_resp["body"]["originalSrc"])
+                        if ugo_zip_resp.status == 200:
+                            frames = {f["file"]: f["delay"] for f in ugo_json_resp["body"]["frames"]}
+                            zipcontent = await ugo_zip_resp.read()
+                            with zipfile.ZipFile(io.BytesIO(zipcontent)) as zf:
+                                files = zf.namelist()
+                                images = []
+                                durations = []
+                                width = 0
+                                height = 0
+                                for file in files:
+                                    f = io.BytesIO(zf.read(file))
+                                    im = Image.open(fp=f)
+                                    width = max(im.width, width)
+                                    height = max(im.height, height)
+                                    images.append(im)
+                                    durations.append(int(frames[file]))
+
+                                first_im = images.pop(0)
+                                image = io.BytesIO()
+                                first_im.save(image, format='webp', save_all=True, append_images=images, duration=durations, lossless=True, quality=100)
+                                image = image.getvalue()
+                                image_name = "ugoria_"+ str(id) + ".webp"
+                                if len(image) > 10485759:
+                                    phixiv_fallback = True
+                        else:
+                            raise exception.RequestFailed("request to pixiv ugoria zip failed")
+                    else:
+                        raise exception.RequestFailed("request to pixiv ugoria api failed")
+
+                embed_title = json_resp['body']["title"]
+                embed_url = json_resp['body']["extraData"]["meta"]["canonical"]
+                embed_author_name = "@"+ json_resp['body']['userName']
+                embed_author_url = "https://www.pixiv.net/users/" + json_resp['body']["userId"]
+                                
             else:
                 raise exception.RequestFailed("request to pixiv ajax failed")
         elif link.startswith("https://twitter.com") or link.startswith("https://x.com"):
@@ -370,24 +412,35 @@ class PostingDevCog(commands.Cog):
                 embed_author_url = "https://twitter.com/" +tweet.user.screen_name
             else:
                 raise exception.RequestFailed("request to twitter image failed")
-        
-        embed = discord.Embed(
-        title=embed_title,
-        url=embed_url,
-        color=discord.Color.purple(),
-        timestamp=datetime.datetime.now()
-        )
-        embed.set_author(name=embed_author_name, url=embed_author_url)
-        embed.add_field(name="Original Poster", value=author.name, inline=False)
-        embed.set_image(url="attachment://"+image_name)
-        embed.set_footer(text="Maren's Art Bot Services")
+        if not phixiv_fallback:
+            embed = discord.Embed(
+            title=embed_title,
+            url=embed_url,
+            color=discord.Color.purple(),
+            timestamp=datetime.datetime.now()
+            )
+            embed.set_author(name=embed_author_name, url=embed_author_url)
+            embed.add_field(name="Original Poster", value=author.name, inline=False)
+            embed.set_image(url="attachment://"+image_name)
+            embed.set_footer(text="Maren's Art Bot Services")
+        else:
+            if image_num:
+                embed = "Poster: "+ author.name + "\n" + link.replace("pixiv", "phixiv") + "/" + str(image_num)
+            else:
+                embed = "Poster: "+ author.name + "\n" + link.replace("pixiv", "phixiv")
 
         for thread in threads:
-            post = await thread.send(embed=embed, file=discord.File(io.BytesIO(image),filename=image_name))
+            if not phixiv_fallback:
+                post = await thread.send(embed=embed, file=discord.File(io.BytesIO(image),filename=image_name))
+            else:
+                post = await thread.send(content=embed)
             if thread == threads[len(threads)-1]:
                 msg += "- " + post.jump_url
             else:
                 msg += "- " + post.jump_url + "\n"
+
+        if phixiv_fallback:
+            msg += "\n**NOTE:** Older embed system (Phixiv) has been used due to the image being too big to upload directly."
         return msg
 
 async def setup(bot):
