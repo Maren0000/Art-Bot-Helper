@@ -15,6 +15,7 @@ class forum_series(str, enum.Enum):
     AzurLane = "azur"
     NIKKE = "nikke"
     WutheringWaves = "wuwa"
+    GirlsFrontline = "gfl"
     Snowbreak = "sb"
     UmaMusume = "uma"
     ProjectSekai = "pjsk"
