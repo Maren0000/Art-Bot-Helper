@@ -188,7 +188,7 @@ class PostingCog(commands.Cog):
             raise(exception.NotPoster("not a poster"))
         
         for channel in ctx.guild.channels:
-            if channel.name == "test-forum"+"-"+safety_level.value:
+            if channel.name == "vtub"+"-"+safety_level.value:
                 forum_channel = channel
         if not forum_channel:
             raise(exception.ForumNotFound("forum not found"))
