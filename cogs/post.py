@@ -89,7 +89,7 @@ class PostingCog(commands.Cog):
         
         # Finding Character threads
         charas = characters.lower().replace("_", " ").split(",")
-        charas = map(str.strip, charas)
+        charas = list(map(str.strip, charas))
         threads = []
         thread_names = []
         for thread in forum_channel.threads:
@@ -210,7 +210,7 @@ class PostingCog(commands.Cog):
             raise(exception.AccessDenied("access denied"))
             
         charas = characters.lower().replace("_", " ").split(",")
-        charas = map(str.strip, charas)
+        charas = list(map(str.strip, charas))
         threads = []
         thread_names = []
         for thread in forum_channel.threads:
