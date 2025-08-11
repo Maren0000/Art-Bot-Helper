@@ -83,7 +83,7 @@ class PostingCog(commands.Cog):
             raise(exception.ForumNotFound("forum not found"))
             
         
-        # Verifying if poster has access to channel
+        # Verifying if posterawait forum_channel.archived_threads() has access to channel
         if ctx.author not in forum_channel.members:
             raise(exception.AccessDenied("access denied"))
         
@@ -103,7 +103,7 @@ class PostingCog(commands.Cog):
 
             if len(threads) == len(charas)+1:
                 break
-        for thread in forum_channel.archived_threads:
+        for thread in await forum_channel.archived_threads():
             if thread.name == "All Characters":
                 threads.append(thread)
                 thread_names.append("All Characters")
@@ -225,7 +225,7 @@ class PostingCog(commands.Cog):
             if thread.name.lower() in charas:
                 threads.append(thread)
                 thread_names.append(thread.name.lower())
-        for thread in forum_channel.archived_threads:
+        for thread in await forum_channel.archived_threads():
             if thread.name == "All Characters":
                 threads.append(thread)
                 thread_names.append("All Characters")
