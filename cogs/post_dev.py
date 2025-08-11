@@ -89,7 +89,8 @@ class PostingDevCog(commands.Cog):
 
             if len(threads) == len(charas)+1:
                 break
-        for thread in await forum_channel.archived_threads():
+        archived = await forum_channel.archived_threads()
+        for thread in archived:
             if thread.name == "All Characters":
                 threads.append(thread)
                 thread_names.append("All Characters")
@@ -211,7 +212,8 @@ class PostingDevCog(commands.Cog):
             if thread.name.lower() in charas:
                 threads.append(thread)
                 thread_names.append(thread.name.lower())
-        for thread in await forum_channel.archived_threads():
+        archived = await forum_channel.archived_threads()
+        for thread in archived:
             if thread.name == "All Characters":
                 threads.append(thread)
                 thread_names.append("All Characters")
