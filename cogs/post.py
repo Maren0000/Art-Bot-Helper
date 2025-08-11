@@ -88,10 +88,22 @@ class PostingCog(commands.Cog):
             raise(exception.AccessDenied("access denied"))
         
         # Finding Character threads
-        charas = characters.lower().replace("_", " ").strip().split(",")
+        charas = characters.lower().replace("_", " ").split(",")
+        charas = map(str.strip, charas)
         threads = []
         thread_names = []
         for thread in forum_channel.threads:
+            if thread.name == "All Characters":
+                threads.append(thread)
+                thread_names.append("All Characters")
+
+            if thread.name.lower() in charas:
+                threads.append(thread)
+                thread_names.append(thread.name.lower())
+
+            if len(threads) == len(charas)+1:
+                break
+        for thread in forum_channel.archived_threads:
             if thread.name == "All Characters":
                 threads.append(thread)
                 thread_names.append("All Characters")
@@ -198,6 +210,7 @@ class PostingCog(commands.Cog):
             raise(exception.AccessDenied("access denied"))
             
         charas = characters.lower().replace("_", " ").split(",")
+        charas = map(str.strip, charas)
         threads = []
         thread_names = []
         for thread in forum_channel.threads:
@@ -212,13 +225,33 @@ class PostingCog(commands.Cog):
             if thread.name.lower() in charas:
                 threads.append(thread)
                 thread_names.append(thread.name.lower())
+        for thread in forum_channel.archived_threads:
+            if thread.name == "All Characters":
+                threads.append(thread)
+                thread_names.append("All Characters")
 
-        if len(threads) != len(charas)+2:
+            if group.value != "indie" and thread.name.lower() == group.value.lower().strip()+" (group)":
+                threads.append(thread)
+                thread_names.append(group.value.lower().strip())
+
+            if thread.name.lower() in charas:
+                threads.append(thread)
+                thread_names.append(thread.name.lower())
+
+        if group.value != "indie" and len(threads) != len(charas)+2:
             missing_threads = ""
             if "All Characters" not in thread_names:
                 missing_threads += "- All Characters\n"
             if group.value.lower() not in thread_names:
                 missing_threads += "- "+group.value+"\n"
+            for chara_name in charas:
+                if chara_name not in thread_names:
+                    missing_threads += "- "+chara_name+"\n"
+            raise(exception.ThreadsNotFound(missing_threads))
+        elif len(threads) != len(charas)+1:
+            missing_threads = ""
+            if "All Characters" not in thread_names:
+                missing_threads += "- All Characters\n"
             for chara_name in charas:
                 if chara_name not in thread_names:
                     missing_threads += "- "+chara_name+"\n"
@@ -346,6 +379,7 @@ class PostingCog(commands.Cog):
         if link.startswith("https://www.pixiv.net"):
             temp = link.split("/")
             id = temp[len(temp)-1].split("?", 1)[0]
+            id = temp[len(temp)-1].split("#", 1)[0]
             resp = await self.bot.client.get("https://www.pixiv.net/ajax/illust/"+id)
             if resp.status == 200:
                 json_resp = json.loads(await resp.text())
@@ -411,6 +445,7 @@ class PostingCog(commands.Cog):
         elif link.startswith("https://twitter.com") or link.startswith("https://x.com"):
             temp = link.split("/")
             id = temp[len(temp)-1].split("?", 1)[0]
+            id = temp[len(temp)-1].split("#", 1)[0]
             tweet = await self.bot.twitterClient.get_tweet_by_id(id)
             image_link = tweet.media[0].media_url
             if image_num:
