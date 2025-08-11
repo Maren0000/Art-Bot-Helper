@@ -211,6 +211,11 @@ class PostingDevCog(commands.Cog):
             if thread.name.lower() in charas:
                 threads.append(thread)
                 thread_names.append(thread.name.lower())
+
+            if group.value != "indie" and len(threads) == len(charas)+2:
+                break
+            elif len(threads) == len(charas)+1:
+                break    
         async for thread in forum_channel.archived_threads():
             if thread.name == "All Characters":
                 threads.append(thread)
@@ -223,6 +228,11 @@ class PostingDevCog(commands.Cog):
             if thread.name.lower() in charas:
                 threads.append(thread)
                 thread_names.append(thread.name.lower())
+
+            if group.value != "indie" and len(threads) == len(charas)+2:
+                break
+            elif len(threads) == len(charas)+1:
+                break
 
         if group.value != "indie" and len(threads) != len(charas)+2:
             missing_threads = ""
