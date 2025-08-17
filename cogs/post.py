@@ -1,97 +1,43 @@
+import io
 from discord.ext import commands
 import discord
 import datetime
 import exception
-import enum
 import json
-import io
 import zipfile
-from PIL import Image
+from PIL import Image    
 
-class series(str, enum.Enum):
-    GenshinImpact = "genshin"
-    HonkaiStarRail = "hsr"
-    HonkaiImpact3rd = "hi3"
-    ZenlessZoneZero = "zzz"
-    BlueArchive = "ba"
-    Arknights = "ark"
-    AzurLane = "azur"
-    NIKKE = "nikke"
-    WutheringWaves = "wuwa"
-    GirlsFrontline = "gfl"
-    Snowbreak = "sb"
-    UmaMusume = "uma"
-    ProjectSekai = "pjsk"
-    Vocaloid = "voca"
-
-class safety_level(str, enum.Enum):
-    Art = "art"
-    Sus = "sus"
-    SC = "sc"
-
-class group(str, enum.Enum):
-    Hololive = "hololive"
-    NIJISANJI = "nijisanji"
-    EONIA = "eonia"
-    Independent = "indie"
-    
-
-class PostingCog(commands.Cog):
+class PostingDevCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-    @commands.hybrid_group(name="post")
-    async def post(self, ctx: commands.Context):
+    @commands.hybrid_command(name="post")
+    async def post(self, ctx: commands.Context, forum_channel: discord.channel.ForumChannel, characters: str, link: str, image_num: int | None = None):
         """
-        Base command for posting. Displays available subcommands.
-        """
-        #print(ctx.invoked_subcommand)
-        if ctx.invoked_subcommand is None:
-           await ctx.send("Avaliable groups: gacha - vtub - anime")
-
-    @post.command()
-    async def gacha(self, ctx: commands.Context, series: series, safety_level: safety_level, characters: str, link: str, image_num: int | None = None):
-        """
-        Post art to one of the gacha game forums (or vocaloid forums)
+        Post art to one of the art forum channels
 
         Parameters
         ----------
         ctx: commands.Context
             The context of the command invocation
-        series: series
-            Series that the character is from.
-        safety_level: safety_level
-            "Safety Level" based on the art piece.
+        forum_channel: discord.channel.ForumChannel
+            Forum art channel to post in.
         characters: str
             All Characters in the image. Seperated by commas.
         link: str
             Pixiv or Twitter link to image.
+        image_num: str
+            Optional argument to select specific image from multiple ones in a post.
         """
         await ctx.defer()
         # Get rid of whitespace at start and end
         characters = characters.strip()
-
-        role_check = ctx.author.get_role(1393719753264201802)
-        if not role_check:
-            raise(exception.NotPoster("not a poster"))
-        
-        # Finding forum channel
-        for channel in ctx.guild.channels:
-            if channel.name == series.value+"-"+safety_level.value:
-                forum_channel = channel
-                break
-        if not forum_channel:
-            raise(exception.ForumNotFound("forum not found"))
-            
-        
-        # Verifying if posterawait forum_channel.archived_threads() has access to channel
-        if ctx.author not in forum_channel.members:
-            raise(exception.AccessDenied("access denied"))
         
         # Finding Character threads
         charas = characters.lower().replace("_", " ").split(",")
         charas = [chara.strip() for chara in charas]
         threads = []
         thread_names = []
+        group_names = []
         for thread in forum_channel.threads:
             if thread.name == "All Characters":
                 threads.append(thread)
@@ -100,28 +46,43 @@ class PostingCog(commands.Cog):
             if thread.name.lower() in charas:
                 threads.append(thread)
                 thread_names.append(thread.name.lower())
+                if len(thread.applied_tags) != 0 and thread.applied_tags[0].name != "Indie" and thread.applied_tags[0].name.lower() + " (group)" not in group_names:
+                    group_names.append(thread.applied_tags[0].name.lower() + " (group)")
 
             if len(threads) == len(charas)+1:
-                break
-        async for thread in forum_channel.archived_threads():
-            if thread.name == "All Characters":
-                threads.append(thread)
-                thread_names.append("All Characters")
-
-            if thread.name.lower() in charas:
-                threads.append(thread)
-                thread_names.append(thread.name.lower())
-
-            if len(threads) == len(charas)+1:
-                break
-        
+                break  
         if len(threads) != len(charas)+1:
+            async for thread in forum_channel.archived_threads():
+                if thread.name == "All Characters":
+                    threads.append(thread)
+                    thread_names.append("All Characters")
+
+                if thread.name.lower() in charas:
+                    threads.append(thread)
+                    thread_names.append(thread.name.lower())
+                    if len(thread.applied_tags) != 0 and thread.applied_tags[0].name != "Indie" and thread.applied_tags[0].name.lower() + " (group)" not in group_names:
+                        group_names.append(thread.applied_tags[0].name.lower() + " (group)")
+
+                if len(threads) == len(charas)+1:
+                    break
+        
+        if len(group_names) > 0:
+            for group_name in group_names:
+                for thread in forum_channel.threads:
+                    if group_name == thread.name.lower():
+                        threads.append(thread)
+                        thread_names.append(thread.name.lower())
+
+        if len(threads) != len(charas)+len(group_names)+1:
             missing_threads = ""
             if "All Characters" not in thread_names:
                 missing_threads += "- All Characters\n"
             for chara_name in charas:
                 if chara_name not in thread_names:
                     missing_threads += "- "+chara_name+"\n"
+            for group_name in group_names:
+                if group_name not in thread_names:
+                    missing_threads += "- "+group_name+"\n"
             raise(exception.ThreadsNotFound(missing_threads))
         
         # Check if valid link and replace
@@ -137,8 +98,8 @@ class PostingCog(commands.Cog):
         embed.add_field(name="Threads & Links", value=thread_links)
 
         await ctx.send(embed=embed)
-    
-    @gacha.error
+        
+    @post.error
     async def posting_error(self, ctx: commands.Context, error: commands.CommandError):
         embed = discord.Embed(
         title=f"Error in command {ctx.command}!",
@@ -172,149 +133,8 @@ class PostingCog(commands.Cog):
         else:
             embed.add_field(name="Python error", value=str(error))
         await ctx.send(embed=embed)
-    
-    @post.command()
-    async def vtub(self, ctx: commands.Context, group: group, safety_level: safety_level, characters: str, link: str, image_num: int | None = None):
-        """
-        Post art to the V-Tuber forums.
-
-        Parameters
-        ----------
-        ctx: commands.Context
-            The context of the command invocation
-        group: group
-            Group that the V-Tuber is from.
-        safety_level: safety_level
-            "Safety Level" based on the art piece.
-        characters: str
-            All Characters in the image. Seperated by commas.
-        link: str
-            Pixiv or Twitter link to image.
-        """
-        await ctx.defer()
-        # Get rid of whitespace at start and end
-        characters = characters.strip()
-
-        role_check = ctx.author.get_role(1393719753264201802)
-        if not role_check:
-            raise(exception.NotPoster("not a poster"))
         
-        for channel in ctx.guild.channels:
-            if channel.name == "vtub"+"-"+safety_level.value:
-                forum_channel = channel
-        if not forum_channel:
-            raise(exception.ForumNotFound("forum not found"))
-        
-        # Verifying if poster has access to channel
-        if ctx.author not in forum_channel.members:
-            raise(exception.AccessDenied("access denied"))
-            
-        charas = characters.lower().replace("_", " ").split(",")
-        charas = [chara.strip() for chara in charas]
-        threads = []
-        thread_names = []
-        for thread in forum_channel.threads:
-            if thread.name == "All Characters":
-                threads.append(thread)
-                thread_names.append("All Characters")
-
-            if group.value != "indie" and thread.name.lower() == group.value.lower().strip()+" (group)":
-                threads.append(thread)
-                thread_names.append(group.value.lower().strip())
-
-            if thread.name.lower() in charas:
-                threads.append(thread)
-                thread_names.append(thread.name.lower())
-
-            if group.value != "indie" and len(threads) == len(charas)+2:
-                break
-            elif len(threads) == len(charas)+1:
-                break
-        async for thread in forum_channel.archived_threads():
-            if thread.name == "All Characters":
-                threads.append(thread)
-                thread_names.append("All Characters")
-
-            if group.value != "indie" and thread.name.lower() == group.value.lower().strip()+" (group)":
-                threads.append(thread)
-                thread_names.append(group.value.lower().strip())
-
-            if thread.name.lower() in charas:
-                threads.append(thread)
-                thread_names.append(thread.name.lower())
-
-            if group.value != "indie" and len(threads) == len(charas)+2:
-                break
-            elif len(threads) == len(charas)+1:
-                break
-
-        if group.value != "indie" and len(threads) != len(charas)+2:
-            missing_threads = ""
-            if "All Characters" not in thread_names:
-                missing_threads += "- All Characters\n"
-            if group.value.lower() not in thread_names:
-                missing_threads += "- "+group.value+"\n"
-            for chara_name in charas:
-                if chara_name not in thread_names:
-                    missing_threads += "- "+chara_name+"\n"
-            raise(exception.ThreadsNotFound(missing_threads))
-        elif len(threads) != len(charas)+1:
-            missing_threads = ""
-            if "All Characters" not in thread_names:
-                missing_threads += "- All Characters\n"
-            for chara_name in charas:
-                if chara_name not in thread_names:
-                    missing_threads += "- "+chara_name+"\n"
-            raise(exception.ThreadsNotFound(missing_threads))
-        
-        # Check if valid link and replace
-        thread_links = await self.link_check_and_send(link, threads, ctx.author, image_num)
-        
-        embed = discord.Embed(
-        title=f"Successfully posted!",
-        description="Your art has been posted in " + forum_channel.jump_url,
-        color=discord.Color.green(),
-        timestamp=datetime.datetime.now()
-        )
-        
-        embed.add_field(name="Threads & Links", value=thread_links)
-
-        await ctx.send(embed=embed)
-
-    @vtub.error
-    async def vtub_error(self, ctx: commands.Context, error: commands.CommandError):
-        embed = discord.Embed(
-        title=f"Error in command {ctx.command}!",
-        description="Unknown error occurred while using the command",
-        color=discord.Color.red(),
-        timestamp=datetime.datetime.now()
-        )
-        if isinstance(error, commands.MissingRequiredArgument):
-            embed.description = "Command format is incorrect! Please format the command as `/post vtub {group} {safety_level} {chara1,chara2} {link}`"
-            embed.add_field(name="Python error", value=str(error))
-        elif isinstance(error, commands.BadArgument):
-            embed.description = "Incorrect Argument! Check if the {group} and {safety_level} are correct."
-            embed.add_field(name="Python error", value=str(error))
-        elif isinstance(error, exception.InvalidLink):
-            embed.description = "Invalid link! Please check {link} argument\nSupported Sites:\n\
-                           - Pixiv (<https://www.pixiv.net>)\n- Twitter (<https://twitter.com> or <https://x.com>)"
-        elif isinstance(error, exception.ForumNotFound):
-            embed.description = "Could not find correct forum channel! Check that {group} and {safety_level} is correct."
-        elif isinstance(error, exception.AccessDenied):
-            embed.description = "You do not have access to the channel you are trying to post to!"
-        elif isinstance(error, exception.ThreadsNotFound):
-            embed.description = "Could not find all character threads!\nMissing threads:\n" + str(error).lstrip("Command raised an exception: str: ")
-        elif isinstance(error, exception.NotPoster):
-            embed.description = "You aren't allowed to post art!"
-        elif isinstance(error, exception.RequestFailed):
-            embed.description = "The bot has failed to contact an external server. Please try again or ping Maren about this issue."
-        elif isinstance(error, exception.AIImageFound):
-            embed.description = "The artist has labeled that this image has been AI assisted. As such, it cannot be added to this server."
-        else:
-            embed.add_field(name="Python error", value=str(error))
-        await ctx.send(embed=embed)
-        
-    @post.command()
+    @commands.hybrid_command(name="help")
     async def help(self, ctx: commands.Context):
         """
         Information about how to use the Bot's post commands.
@@ -322,15 +142,9 @@ class PostingCog(commands.Cog):
         embed=discord.Embed(title="How to post using the bot",
                             description=("This bot supports using the newer slash commands (/post)."),
                             color=discord.Color.yellow())
-        embed.add_field(name="/post gacha", value=("Command for posting to gacha channels (and vocaloid)"
-                        "\nSyntax: `/post gacha {series} {safety_level} {characters} {link} {image_num}`"
-                        "\n`{series}` and `{safety_level}`: Pick from the available list."
-                        "\n`{characters}`: Check \"{characters}\" section."
-                        "\n`{Link}`: Check \"{Link}\" section."
-                        "\n`{image_num}`: Check \"{image_num}\" section."), inline=False)
-        embed.add_field(name="/post vtub", value=("Command for posting to vtuber channels"
-                        "\nSyntax: `/post vtub {group} {safety_level} {characters} {link} {image_num}`"
-                        "\n`{group}` and `{safety_level}`: Pick from the available list."
+        embed.add_field(name="/post", value=("Command for posting to gacha channels (and vocaloid)"
+                        "\nSyntax: `/post {forum_channel} {characters} {link} {image_num}`"
+                        "\n`{forum_channel}`: Pick from the available list."
                         "\n`{characters}`: Check \"{characters}\" section."
                         "\n`{Link}`: Check \"{Link}\" section."
                         "\n`{image_num}`: Check \"{image_num}\" section."), inline=False)
@@ -341,45 +155,9 @@ class PostingCog(commands.Cog):
                         "\nThe bot will download and upload the selected image as a new embed if allowed by the server upload limit. Otherwise, an external embed service (like Phixiv) will be used."), inline=False)
         embed.add_field(name="{image_num}", value=("This is an optional argument. Use it for when a post has multiple images and you want to select a specific one."
                         "\nMust be a number (Ex. 2 for 2nd image in the post)."), inline=False)
+        embed.add_field(name="Note on Tags", value=("Please note that if a character thread has a tag, the default behaviour is to find a group thread for that tag."
+                        "\nIf that causes issues with posting, please ping Maren about it."), inline=False)
         await ctx.send(embed=embed)
-    
-    @post.command()
-    async def anime(self, ctx: commands.Context):
-        """
-        Coming Soon.
-        """
-        await ctx.send("Maren is still thinking about how to handle the anime channels, so this command isn't avaiable yet")
-        '''args = message.split(" ")
-        if len(args) != 3:
-            await ctx.send("Message format is incorrect! Please format the message as `!post {group} {series} {chara1,chara2} {link}`")
-            return
-        charas = args[1].lower().split(",")
-        for channel in ctx.guild.channels:
-            if channel.name == args[0]+"-sus":
-                forum_channel = channel
-                print(channel.name)
-        if not forum_channel:
-            await ctx.send("Could not find correct forum channel! Check that {series} is correct")
-            return
-        
-        threads = []
-        for thread in forum_channel.threads:
-            if thread.name == "All Characters":
-                threads.append(thread)
-
-            if thread.name.lower().replace(" ", "_") in charas:
-                threads.append(thread)
-        
-        if len(threads) != len(charas)+1:
-            await ctx.send("Could not all character threads! Check that {chara1} is correct or if all the threads exist.")
-            return
-        
-        msg = "Secussfully posted in " + forum_channel.name + " and following threads:\n"
-        for thread in threads:
-            msg += thread.name + " - "
-            await thread.send(args[2].replace("pixiv", "phixiv"))
-        
-        await ctx.send(msg)'''
 
     async def link_check_and_send(self, link: str, threads: list, author, image_num: int | None = None) -> str:
         msg = ""
@@ -503,4 +281,4 @@ class PostingCog(commands.Cog):
         return msg
 
 async def setup(bot):
-    await bot.add_cog(PostingCog(bot))
+    await bot.add_cog(PostingDevCog(bot))

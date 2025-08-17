@@ -40,3 +40,11 @@ class RequestFailed(commands.CommandInvokeError):
 class AIImageFound(commands.CommandInvokeError):
     """User tried to post GenAI image."""
     pass
+
+class NotAnEmoji(commands.CommandInvokeError):
+    """User used an invalid emoji."""
+    pass
+
+class TagsNotFound(commands.CommandInvokeError):
+    """Forum tags could not be found."""
+    pass

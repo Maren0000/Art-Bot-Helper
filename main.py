@@ -24,6 +24,7 @@ class CustomBot(commands.Bot):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.ext_dir = ext_dir
         self.synced = False
+        self.remove_command('help')
 
     async def _load_extensions(self) -> None:
         if not os.path.isdir(self.ext_dir):
