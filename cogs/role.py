@@ -44,6 +44,9 @@ class RoleCog(commands.Cog):
                 case "violet_gift":
                     role = discord.utils.get(payload.member.guild.roles, name="Akane")
                     await payload.member.add_roles(role, reason="Reaction Role")
+                case "kouzy":
+                    role = discord.utils.get(payload.member.guild.roles, name="Hikari")
+                    await payload.member.add_roles(role, reason="Reaction Role")
     @commands.Cog.listener()
     async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
         if payload.message_id == 1399828849352773794:
@@ -85,6 +88,9 @@ class RoleCog(commands.Cog):
                     await member.remove_roles(role, reason="Reaction Role")
                 case "violet_gift":
                     role = discord.utils.get(guild.roles, name="Akane")
+                    await member.remove_roles(role, reason="Reaction Role")
+                case "kouzy":
+                    role = discord.utils.get(guild.roles, name="Hikari")
                     await member.remove_roles(role, reason="Reaction Role")
 
 async def setup(bot):

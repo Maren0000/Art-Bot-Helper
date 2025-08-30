@@ -4,7 +4,7 @@ from discord.ext import commands
 from utils import is_emoji
 import exception
 
-class ThreadDevCog(commands.Cog):
+class ThreadCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
@@ -115,6 +115,7 @@ class ThreadDevCog(commands.Cog):
             Emote to use for the new tag.
         """
         name = name.strip()
+        emote = emote.strip()
         
         if not is_emoji(emote):
             raise(exception.NotAnEmoji("not a unicode emoji"))
@@ -128,6 +129,7 @@ class ThreadDevCog(commands.Cog):
         )
         await ctx.send(embed=embed)
     
+    # Tag errors fail here for some reason?
     @tag.error
     @post.error
     async def create_error(self, ctx: commands.Context, error: commands.CommandError):
@@ -415,4 +417,4 @@ class ThreadDevCog(commands.Cog):
         await ctx.send(embed=embed)
 
 async def setup(bot):
-    await bot.add_cog(ThreadDevCog(bot))
+    await bot.add_cog(ThreadCog(bot))

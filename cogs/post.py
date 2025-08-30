@@ -4,10 +4,9 @@ import discord
 import datetime
 import exception
 import json
-import zipfile
-from PIL import Image    
+import utils  
 
-class PostingDevCog(commands.Cog):
+class PostingCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
     @commands.hybrid_command(name="post")
@@ -190,39 +189,11 @@ class PostingDevCog(commands.Cog):
                     else:
                         raise exception.RequestFailed("request to pixiv image failed")
                 else: # Ugoria video
-                    ugo_resp = await self.bot.client.get("https://www.pixiv.net/ajax/illust/"+id+"/ugoira_meta")
-                    if resp.status == 200:
-                        ugo_json_resp = json.loads(await ugo_resp.text())
-                        ugo_zip_resp = await self.bot.client.get(ugo_json_resp["body"]["originalSrc"])
-                        if ugo_zip_resp.status == 200:
-                            frames = {f["file"]: f["delay"] for f in ugo_json_resp["body"]["frames"]}
-                            zipcontent = await ugo_zip_resp.read()
-                            with zipfile.ZipFile(io.BytesIO(zipcontent)) as zf:
-                                files = zf.namelist()
-                                images = []
-                                durations = []
-                                width = 0
-                                height = 0
-                                for file in files:
-                                    f = io.BytesIO(zf.read(file))
-                                    im = Image.open(fp=f)
-                                    width = max(im.width, width)
-                                    height = max(im.height, height)
-                                    images.append(im)
-                                    durations.append(int(frames[file]))
+                    image, image_name = utils.ugoria_merge(self.bot.client, id)
+                    if len(image) > 10485759:
+                        phixiv_fallback = True
 
-                                first_im = images.pop(0)
-                                image = io.BytesIO()
-                                first_im.save(image, format='webp', save_all=True, append_images=images, duration=durations, lossless=True, quality=100)
-                                image = image.getvalue()
-                                image_name = "ugoria_"+ str(id) + ".webp"
-                                if len(image) > 10485759:
-                                    phixiv_fallback = True
-                        else:
-                            raise exception.RequestFailed("request to pixiv ugoria zip failed")
-                    else:
-                        raise exception.RequestFailed("request to pixiv ugoria api failed")
-
+                
                 embed_title = json_resp['body']["title"]
                 embed_url = json_resp['body']["extraData"]["meta"]["canonical"]
                 embed_author_name = "@"+ json_resp['body']['userName']
@@ -281,4 +252,4 @@ class PostingDevCog(commands.Cog):
         return msg
 
 async def setup(bot):
-    await bot.add_cog(PostingDevCog(bot))
+    await bot.add_cog(PostingCog(bot))
