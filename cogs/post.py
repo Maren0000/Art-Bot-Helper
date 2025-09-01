@@ -85,7 +85,7 @@ class PostingCog(commands.Cog):
             raise(exception.ThreadsNotFound(missing_threads))
         
         # Check if valid link and replace
-        thread_links = await self.link_check_and_send(link, threads, ctx.author, image_num)
+        thread_links = await self.link_check_and_send(link, threads, ctx, image_num)
         
         embed = discord.Embed(
         title=f"Successfully posted!",
@@ -158,7 +158,7 @@ class PostingCog(commands.Cog):
                         "\nIf that causes issues with posting, please ping Maren about it."), inline=False)
         await ctx.send(embed=embed)
 
-    async def link_check_and_send(self, link: str, threads: list, author, image_num: int | None = None) -> str:
+    async def link_check_and_send(self, link: str, threads: list, context: commands.Context, image_num: int | None = None) -> str:
         msg = ""
         phixiv_fallback = False
         if not link.startswith("https://www.pixiv.net") and not link.startswith("https://twitter.com") and not link.startswith("https://x.com"):
@@ -182,16 +182,26 @@ class PostingCog(commands.Cog):
                         image_link += str(image_num-1)+extension
                     image_req = await self.bot.client.get(image_link)
                     if image_req.status == 200:
-                        if int(image_req.headers['Content-Length']) > 10485759: # Temp because non-boosted servers only get 10MB upload
-                            phixiv_fallback = True
+                        if context.guild.premium_tier > 1: # Tier 2 servers get 50MB upload. Non-boosted servers only get 10MB upload
+                            if int(image_req.headers['Content-Length']) > 52428799: 
+                                phixiv_fallback = True
+                            else:
+                                image = await image_req.read()
                         else:
-                            image = await image_req.read()
+                            if int(image_req.headers['Content-Length']) > 10485759: 
+                                phixiv_fallback = True
+                            else:
+                                image = await image_req.read()
                     else:
                         raise exception.RequestFailed("request to pixiv image failed")
                 else: # Ugoria video
                     image, image_name = utils.ugoria_merge(self.bot.client, id)
-                    if len(image) > 10485759:
-                        phixiv_fallback = True
+                    if context.guild.premium_tier > 1:
+                        if int(image) > 52428799: 
+                            phixiv_fallback = True
+                    else:
+                        if len(image) > 10485759:
+                            phixiv_fallback = True
 
                 
                 embed_title = json_resp['body']["title"]
@@ -228,14 +238,14 @@ class PostingCog(commands.Cog):
             timestamp=datetime.datetime.now()
             )
             embed.set_author(name=embed_author_name, url=embed_author_url)
-            embed.add_field(name="Original Poster", value=author.name, inline=False)
+            embed.add_field(name="Original Poster", value=context.author.name, inline=False)
             embed.set_image(url="attachment://"+image_name)
             embed.set_footer(text="Maren's Art Bot Services")
         else:
             if image_num:
-                embed = "Poster: "+ author.name + "\n" + link.replace("pixiv", "phixiv") + "/" + str(image_num)
+                embed = "Poster: "+ context.author.name + "\n" + link.replace("pixiv", "phixiv") + "/" + str(image_num)
             else:
-                embed = "Poster: "+ author.name + "\n" + link.replace("pixiv", "phixiv")
+                embed = "Poster: "+ context.author.name + "\n" + link.replace("pixiv", "phixiv")
 
         for thread in threads:
             if not phixiv_fallback:
