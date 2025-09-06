@@ -58,7 +58,7 @@ class CustomBot(commands.Bot):
         email = os.getenv("TWITTER_EMAIL")
         pw = os.getenv("TWITTER_PW")
         self.twitterClient = Client('en-US')
-        await self.twitterClient.login(auth_info_1=name,auth_info_2=email,password=pw,cookies_file="twt_cookies.json")
+        #await self.twitterClient.login(auth_info_1=name,auth_info_2=email,password=pw,cookies_file="twt_cookies.json")
         await self._load_extensions()
         #if not self.synced:
             
