@@ -197,7 +197,7 @@ class PostingCog(commands.Cog):
                 else: # Ugoria video
                     image, image_name = await utils.ugoria_merge(self.bot.client, id)
                     if context.guild.premium_tier > 1:
-                        if int(image) > 52428799: 
+                        if len(image) > 52428799: 
                             phixiv_fallback = True
                     else:
                         if len(image) > 10485759:
