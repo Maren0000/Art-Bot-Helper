@@ -195,7 +195,7 @@ class PostingCog(commands.Cog):
                     else:
                         raise exception.RequestFailed("request to pixiv image failed")
                 else: # Ugoria video
-                    image, image_name = utils.ugoria_merge(self.bot.client, id)
+                    image, image_name = await utils.ugoria_merge(self.bot.client, id)
                     if context.guild.premium_tier > 1:
                         if int(image) > 52428799: 
                             phixiv_fallback = True
