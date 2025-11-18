@@ -1,4 +1,5 @@
 import io
+import os
 from discord.ext import commands
 import discord
 import datetime
@@ -85,7 +86,7 @@ class PostingCog(commands.Cog):
             raise(exception.ThreadsNotFound(missing_threads))
         
         # Check if valid link and replace
-        thread_links = await self.link_check_and_send(link, threads, ctx, image_num)
+        thread_links = await self.link_check_and_send(link, threads, ctx, forum_channel.name, image_num)
         
         embed = discord.Embed(
         title=f"Successfully posted!",
@@ -158,7 +159,7 @@ class PostingCog(commands.Cog):
                         "\nIf that causes issues with posting, please ping Maren about it."), inline=False)
         await ctx.send(embed=embed)
 
-    async def link_check_and_send(self, link: str, threads: list, context: commands.Context, image_num: int | None = None) -> str:
+    async def link_check_and_send(self, link: str, threads: list, context: commands.Context, channel_name, image_num: int | None = None) -> str:
         msg = ""
         phixiv_fallback = False
         if not link.startswith("https://www.pixiv.net") and not link.startswith("https://twitter.com") and not link.startswith("https://x.com"):
@@ -257,9 +258,17 @@ class PostingCog(commands.Cog):
             else:
                 msg += "- " + post.jump_url + "\n"
 
+        await self.send_webhook(embed, post, channel_name)
+
         if phixiv_fallback:
             msg += "\n**NOTE:** Older embed system (Phixiv) has been used due to the image being too big to upload directly."
         return msg
+    
+    async def send_webhook(self, embed, post: discord.Message, channel_name: str):
+        if "ba-art" in channel_name:
+            embed.set_image(url=post.embeds[0].image.url)
+            await self.bot.client.post(os.getenv("WEBHOOK_PROXY"), data ={"payload_json":  json.dumps({"embeds": [embed.to_dict()]})})
+
 
 async def setup(bot):
     await bot.add_cog(PostingCog(bot))
