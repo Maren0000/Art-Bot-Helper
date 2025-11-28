@@ -5,7 +5,8 @@ import datetime
 import exception
 import json
 import zipfile
-from PIL import Image    
+from PIL import Image
+import os
 
 class PostingDevCog(commands.Cog):
     def __init__(self, bot):
@@ -86,7 +87,7 @@ class PostingDevCog(commands.Cog):
             raise(exception.ThreadsNotFound(missing_threads))
         
         # Check if valid link and replace
-        thread_links = await self.link_check_and_send(link, threads, ctx.author, image_num)
+        thread_links = await self.link_check_and_send(link, threads, ctx.author, forum_channel.name, image_num)
         
         embed = discord.Embed(
         title=f"Successfully posted!",
@@ -96,6 +97,8 @@ class PostingDevCog(commands.Cog):
         )
 
         embed.add_field(name="Threads & Links", value=thread_links)
+
+        
 
         await ctx.send(embed=embed)
         
@@ -159,7 +162,7 @@ class PostingDevCog(commands.Cog):
                         "\nIf that causes issues with posting, please ping Maren about it."), inline=False)
         await ctx.send(embed=embed)
 
-    async def link_check_and_send(self, link: str, threads: list, author, image_num: int | None = None) -> str:
+    async def link_check_and_send(self, link: str, threads: list, author, channel_name: str, image_num: int | None = None) -> str:
         msg = ""
         phixiv_fallback = False
         if not link.startswith("https://www.pixiv.net") and not link.startswith("https://twitter.com") and not link.startswith("https://x.com"):
@@ -275,10 +278,21 @@ class PostingDevCog(commands.Cog):
                 msg += "- " + post.jump_url
             else:
                 msg += "- " + post.jump_url + "\n"
+        
+        await self.send_webhook(embed, post, channel_name)
 
         if phixiv_fallback:
             msg += "\n**NOTE:** Older embed system (Phixiv) has been used due to the image being too big to upload directly."
         return msg
+    
+    async def send_webhook(self, embed, post: discord.Message, channel_name: str):
+        if channel_name in self.bot.webhooks:
+            embed.set_image(url=post.embeds[0].image.url)
+            for webhook_env in self.bot.webhooks[channel_name]:
+                await self.bot.client.post(os.getenv(webhook_env), data ={"payload_json":  json.dumps({"embeds": [embed.to_dict()]})})
+
+
+
 
 async def setup(bot):
     await bot.add_cog(PostingDevCog(bot))

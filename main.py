@@ -4,6 +4,7 @@ import os
 import traceback
 import typing
 import aiohttp
+import json
 from twikit import Client
 
 import discord
@@ -14,6 +15,7 @@ from dotenv import load_dotenv
 class CustomBot(commands.Bot):
     client: aiohttp.ClientSession
     twitterClient = Client
+    webhooks = {}
     _uptime: datetime.datetime = datetime.datetime.now()
 
     def __init__(self, prefix: str, ext_dir: str, *args: typing.Any, **kwargs: typing.Any) -> None:
@@ -54,11 +56,12 @@ class CustomBot(commands.Bot):
     async def setup_hook(self) -> None:
         cookie = os.getenv("PIXIV_COOKIE")
         self.client = aiohttp.ClientSession(cookies={'PHPSESSID': cookie},headers={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0", "Referer": "https://www.pixiv.net/"})
-        name = os.getenv("TWITTER_NAME")
-        email = os.getenv("TWITTER_EMAIL")
-        pw = os.getenv("TWITTER_PW")
-        self.twitterClient = Client('en-US')
+        #name = os.getenv("TWITTER_NAME")
+        #email = os.getenv("TWITTER_EMAIL")
+        #pw = os.getenv("TWITTER_PW")
+        #self.twitterClient = Client('en-US')
         #await self.twitterClient.login(auth_info_1=name,auth_info_2=email,password=pw,cookies_file="twt_cookies.json")
+        self.webhooks = json.load(open("./configs/webhooks.json", "r"))
         await self._load_extensions()
         #if not self.synced:
             

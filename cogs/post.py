@@ -265,9 +265,10 @@ class PostingCog(commands.Cog):
         return msg
     
     async def send_webhook(self, embed, post: discord.Message, channel_name: str):
-        if "ba-art" in channel_name:
+        if channel_name in self.bot.webhooks:
             embed.set_image(url=post.embeds[0].image.url)
-            await self.bot.client.post(os.getenv("WEBHOOK_PROXY"), data ={"payload_json":  json.dumps({"embeds": [embed.to_dict()]})})
+            for webhook_env in self.bot.webhooks[channel_name]:
+                await self.bot.client.post(os.getenv(webhook_env), data ={"payload_json":  json.dumps({"embeds": [embed.to_dict()]})})
 
 
 async def setup(bot):
