@@ -48,3 +48,7 @@ class NotAnEmoji(commands.CommandInvokeError):
 class TagsNotFound(commands.CommandInvokeError):
     """Forum tags could not be found."""
     pass
+
+class CharacterDetectFail(commands.CommandInvokeError):
+    """Automatic Character Detection has failed."""
+    pass

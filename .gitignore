@@ -209,3 +209,4 @@ __marimo__/
 *.old
 twt_cookies.json
 configs/
+.idea/
