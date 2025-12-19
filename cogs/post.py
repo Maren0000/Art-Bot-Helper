@@ -447,9 +447,7 @@ class PostingCog(commands.Cog):
                     image_link = json_resp['body']['urls']['thumb']
                     temp = json_resp['body']['urls']['thumb'].split("/")
                     if image_num:
-                        extension = image_link[-4:]
-                        image_link = image_link[:len(image_link)-5]
-                        image_link += str(image_num-1)+extension
+                        image_link = image_link.replace("_p0_", f"_p{image_num-1}_")
                     image_req = await self.bot.client.get(image_link)
                     if image_req.status == 200:
                         image = await image_req.read()
