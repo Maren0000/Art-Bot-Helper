@@ -20,7 +20,7 @@ class SyncCog(commands.Cog):
                 await ctx.bot.tree.sync(guild=ctx.guild)
                 synced = []
             else:
-                ctx.bot.tree.clear_commands(guild=None)
+                #ctx.bot.tree.clear_commands(guild=None)
                 synced = await ctx.bot.tree.sync()
 
             await ctx.send(
