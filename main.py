@@ -90,7 +90,7 @@ class CustomBot(commands.Bot):
             self.safety_map = {}
         await self._load_extensions()
         if not self.synced:
-            
+            await self.tree.sync()
             self.synced = not self.synced
             self.logger.info("Synced command tree")
 
