@@ -293,7 +293,7 @@ class PostingCog(commands.Cog):
         await ctx.send(embed=embed)
 
     async def detect_characters(self, ajax_resp: dict, image_num: int) -> str | str | str:
-        image_link = ajax_resp['body']['urls']['thumb']
+        image_link = ajax_resp['body']['urls']['small']
         if image_num:
             image_link = image_link.replace("_p0_", f"_p{image_num-1}_")
         image_req = await self.bot.client.get(image_link)
