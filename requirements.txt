@@ -7,6 +7,7 @@ audioop-lts==0.2.2
 beautifulsoup4==4.14.3
 braceexpand==0.1.7
 certifi==2025.11.12
+charset-normalizer==3.4.4
 click==8.3.1
 discord.py==2.6.4
 filelock==3.20.1
@@ -33,6 +34,7 @@ pyjsparser==2.7.1
 pyotp==2.9.0
 python-dotenv==1.2.1
 PyYAML==6.0.3
+requests==2.32.5
 shellingham==1.5.4
 six==1.17.0
 socksio==1.0.0
@@ -43,5 +45,6 @@ twikit @ git+https://github.com/Maren0000/twikit.git@ef2cf544f076f3d1acba2415a8f
 typer-slim==0.20.0
 typing_extensions==4.15.0
 tzlocal==5.3.1
+urllib3==2.6.2
 webvtt-py==0.5.1
 yarl==1.22.0

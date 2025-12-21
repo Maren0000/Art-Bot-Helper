@@ -3,6 +3,7 @@ import json
 from PIL import Image
 import zipfile
 import exception
+import aiohttp
 
 def is_emoji(character):
     if "<:" in character:
@@ -17,6 +18,18 @@ def is_emoji(character):
         code_point in range(0x1F680, 0x1F6FF) or
         code_point in range(0x1F700, 0x1F77F)
     )
+
+async def pixiv_ajax_get(client: aiohttp.ClientSession, link: str):
+    temp = link.split("/")
+    id = temp[len(temp)-1].split("?", 1)[0]
+    id = temp[len(temp)-1].split("#", 1)[0]
+    resp = await client.get("https://www.pixiv.net/ajax/illust/"+id)
+    if resp.status == 200:
+        json_resp = json.loads(await resp.text())
+        if json_resp['body']['aiType'] > 1:
+            raise exception.AIImageFound("pixiv ai image")
+        else:
+            return json_resp
 
 async def ugoria_merge(client, id) -> tuple[bytes, str]:
     ugo_resp = await client.get("https://www.pixiv.net/ajax/illust/"+id+"/ugoira_meta")
