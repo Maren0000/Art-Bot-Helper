@@ -9,9 +9,7 @@ import json
 import utils
 from base64 import b64encode
 
-import typing
-
-from view import AutoPostView, ForumSelect, BaseModal
+from view import AutoPostView
 
 class PostingCog(commands.Cog):
     def __init__(self, bot):
@@ -39,7 +37,11 @@ class PostingCog(commands.Cog):
 
         view = AutoPostView(ctx.author, timeout=300)
 
-        view.characters, series, safety = await self.detect_characters(ajax_resp, image_num)
+        charas_model, series, safety = await self.tags_model_pass(ajax_resp, image_num)
+
+        charas_pixiv, series = self.tags_pixiv_pass(ajax_resp)
+
+        view.characters = ",".join(charas_model | charas_pixiv)
 
         # Finding forum channel
         if series != "" and safety != "":
@@ -292,7 +294,7 @@ class PostingCog(commands.Cog):
                         "\nIf that causes issues with posting, please ping Maren about it."), inline=False)
         await ctx.send(embed=embed)
 
-    async def detect_characters(self, ajax_resp: dict, image_num: int) -> str | str | str:
+    async def tags_model_pass(self, ajax_resp: dict, image_num: int) -> str | str | str:
         image_link = ajax_resp['body']['urls']['small']
         if image_num:
             image_link = image_link.replace("_p0_", f"_p{image_num-1}_")
@@ -324,10 +326,10 @@ class PostingCog(commands.Cog):
         api_name="/_wrap_predict"
         )
 
-        chara_temp = []
+        charas = set()
         for chara in result[1]:
-            if chara in self.bot.char_map and self.bot.char_map[chara] not in chara_temp:
-                chara_temp.append(self.bot.char_map[chara])
+            if chara in self.bot.char_map:
+                charas.add(self.bot.char_map[chara])
 
         series = ""
         for series_can in result[2]:
@@ -339,7 +341,20 @@ class PostingCog(commands.Cog):
         if len(result[5]) != 0:
             safety = self.bot.safety_map[next(iter(result[5]))] 
         
-        return ",".join(chara_temp), series, safety
+        return charas, series, safety
+
+    def tags_pixiv_pass(self, ajax_resp: dict) -> str | str:
+        chara_tags = set()
+        series = ""
+        for tag_dict in ajax_resp['body']['tags']['tags']:
+            tag = tag_dict['tag']
+            if tag in self.bot.char_map:
+                chara_tags.add(self.bot.char_map[tag])
+            elif tag in self.bot.series_map:
+                series = self.bot.series_map[tag]
+        
+        return chara_tags, series
+
 
     async def link_check_and_send(self, link: str, threads: list, context: commands.Context, channel_name, image_num: int | None = None) -> str:
         msg = ""
@@ -382,25 +397,6 @@ class PostingCog(commands.Cog):
             embed_author_name = "@"+ ajax_resp['body']['userName']
             embed_author_url = "https://www.pixiv.net/users/" + ajax_resp['body']["userId"]
 
-        elif link.startswith("https://twitter.com") or link.startswith("https://x.com"):
-            temp = link.split("/")
-            id = temp[len(temp)-1].split("?", 1)[0]
-            id = temp[len(temp)-1].split("#", 1)[0]
-            tweet = await self.bot.twitterClient.get_tweet_by_id(id)
-            image_link = tweet.media[0].media_url
-            if image_num:
-                image_link = tweet.media[image_num-1].media_url
-            image_req = await self.bot.client.get(image_link)
-            temp = tweet.media[0].media_url.split("/")
-            image_name = temp[len(temp)-1]
-            if image_req.status == 200:
-                image = await image_req.read()
-                embed_title = "Tweet"
-                embed_url = link
-                embed_author_name = tweet.user.name
-                embed_author_url = "https://twitter.com/" +tweet.user.screen_name
-            else:
-                raise exception.RequestFailed("request to twitter image failed")
         if not phixiv_fallback:
             embed = discord.Embed(
             title=embed_title,

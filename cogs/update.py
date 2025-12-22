@@ -23,7 +23,7 @@ class UpdateCog(commands.Cog):
     @commands.is_owner()
     async def characters(self, ctx: commands.Context, json_file: discord.Attachment):
         """
-        Create a thread in one of the Art forum channels.
+        Update the character mapping JSON file.
 
         Parameters
         ----------
@@ -42,7 +42,7 @@ class UpdateCog(commands.Cog):
     @commands.is_owner()
     async def series(self, ctx: commands.Context, json_file: discord.Attachment):
         """
-        Create a thread in one of the Art forum channels.
+        Update the series mapping JSON file.
 
         Parameters
         ----------
@@ -55,6 +55,25 @@ class UpdateCog(commands.Cog):
             json_data = await json_file.read()
             self.bot.series_map = json.loads(json_data)
             open("./configs/series_map.json", "wb").write(json_data)
+
+    @update.command()
+    @commands.guild_only()
+    @commands.is_owner()
+    async def webhooks(self, ctx: commands.Context, json_file: discord.Attachment):
+        """
+        Update the webhooks JSON file.
+
+        Parameters
+        ----------
+        ctx: commands.Context
+            The context of the command invocation
+        json_file: discord.Attachment
+            JSON file to update character list.
+        """
+        if json_file.filename.endswith(".json"):
+            json_data = await json_file.read()
+            self.bot.webhooks = json.loads(json_data)
+            open("./configs/webhooks.json", "wb").write(json_data)
 
 async def setup(bot):
     await bot.add_cog(UpdateCog(bot))

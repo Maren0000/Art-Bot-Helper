@@ -41,7 +41,6 @@ socksio==1.0.0
 soupsieve==2.8.1
 tabulate==0.9.0
 tqdm==4.67.1
-twikit @ git+https://github.com/Maren0000/twikit.git@ef2cf544f076f3d1acba2415a8f08bada8e836de
 typer-slim==0.20.0
 typing_extensions==4.15.0
 tzlocal==5.3.1

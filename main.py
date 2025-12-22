@@ -5,7 +5,6 @@ import traceback
 import typing
 import aiohttp
 import json
-from twikit import Client as TwitterClient
 from gradio_client import Client as GraioClient
 
 import discord
@@ -15,7 +14,6 @@ from dotenv import load_dotenv
 
 class CustomBot(commands.Bot):
     client: aiohttp.ClientSession
-    twitterClient = TwitterClient
     gradioClient = GraioClient("Halfabumcake/camie-test")
     webhooks = {}
     char_map = {}
@@ -56,11 +54,6 @@ class CustomBot(commands.Bot):
     async def setup_hook(self) -> None:
         cookie = os.getenv("PIXIV_COOKIE")
         self.client = aiohttp.ClientSession(cookies={'PHPSESSID': cookie},headers={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0", "Referer": "https://www.pixiv.net/"})
-        #name = os.getenv("TWITTER_NAME")
-        #email = os.getenv("TWITTER_EMAIL")
-        #pw = os.getenv("TWITTER_PW")
-        #self.twitterClient = Client('en-US')
-        #await self.twitterClient.login(auth_info_1=name,auth_info_2=email,password=pw,cookies_file="twt_cookies.json")
         # load webhook mappings (maps channel name -> [ENV_VAR_NAMES])
         self.webhooks = json.load(open("./configs/webhooks.json", "r"))
         # load optional character mapping (danbooru-tag -> canonical thread name)

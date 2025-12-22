@@ -75,7 +75,13 @@ class AutoPostView(BaseView):
         self.characters: str | None = None
         self.selected_forum: discord.ForumChannel | None = None
 
-    async def _handle_confirm(self, interaction: discord.Interaction, *, confirmed: bool):
+    async def _turn_off_view(self, interaction: discord.Interaction, *, confirmed: bool):
+        self.confirmed = confirmed
+        self._disable_all()
+        await interaction.response.edit_message(view=self)
+        self.stop()
+
+    async def _confirm_check(self, interaction: discord.Interaction):
         if self.characters == "":
             await interaction.response.send_message(
                 "Please fill out the characters. Use commas as a delimiter for multiple characters.", ephemeral=True
@@ -85,10 +91,7 @@ class AutoPostView(BaseView):
                 "Please select a forum.", ephemeral=True
             )
         else:
-            self.confirmed = confirmed
-            self._disable_all()
-            await interaction.response.edit_message(view=self)
-            self.stop()
+            await self._turn_off_view(interaction, confirmed=True)
 
     @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="Edit forum channel", channel_types=[discord.ChannelType.forum], min_values=1, max_values=1,)
     async def forum_select(self, interaction: discord.Interaction, forum_choice: discord.ui.ChannelSelect):
@@ -104,20 +107,11 @@ class AutoPostView(BaseView):
     
     @discord.ui.button(label="Confirm", style=discord.ButtonStyle.green, emoji="✅", custom_id="yes")
     async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button[AutoPostView]) -> None:
-        await self._handle_confirm(interaction, confirmed=True)
+        await self._confirm_check(interaction)
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.danger, emoji="❌", custom_id="no")
     async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button[AutoPostView]) -> None:
-        await self._handle_confirm(interaction, confirmed=False)
-
-    
-
-class ForumSelect(discord.ui.ChannelSelect):
-    def __init__(self):
-        super().__init__(
-            placeholder="Edit forum channel",
-            channel_types=[discord.ChannelType.forum] 
-        )
+        await self._turn_off_view(interaction, confirmed=False)
 
 class BaseModal(discord.ui.Modal):
     _interaction: discord.Interaction | None = None
