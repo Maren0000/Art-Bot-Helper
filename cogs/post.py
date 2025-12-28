@@ -416,7 +416,7 @@ class PostingCog(commands.Cog):
 
         for thread in threads:
             if not phixiv_fallback:
-                post = await thread.send(embed=embed, file=discord.File(io.BytesIO(image),filename=image_name))
+                post = await thread.send(content=f"<{link}>",embed=embed, file=discord.File(io.BytesIO(image),filename=image_name))
             else:
                 post = await thread.send(content=embed)
             if thread == threads[len(threads)-1]:
@@ -424,17 +424,17 @@ class PostingCog(commands.Cog):
             else:
                 msg += "- " + post.jump_url + "\n"
 
-        await self.send_webhook(embed, post, channel_name)
+        await self.send_webhook(embed, post, channel_name, link)
 
         if phixiv_fallback:
             msg += "\n**NOTE:** Older embed system (Phixiv) has been used due to the image being too big to upload directly."
         return msg
     
-    async def send_webhook(self, embed, post: discord.Message, channel_name: str):
+    async def send_webhook(self, embed, post: discord.Message, channel_name: str, link: str):
         if channel_name in self.bot.webhooks:
             embed.set_image(url=post.embeds[0].image.url)
             for webhook_env in self.bot.webhooks[channel_name]:
-                await self.bot.client.post(os.getenv(webhook_env), data ={"payload_json":  json.dumps({"embeds": [embed.to_dict()]})})
+                await self.bot.client.post(os.getenv(webhook_env), data ={"payload_json":  json.dumps({"content": f"<{link}>", "embeds": [embed.to_dict()]})})
 
 
 async def setup(bot):
