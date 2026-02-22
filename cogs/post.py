@@ -6,7 +6,7 @@ import discord
 import datetime
 import exception
 import json
-import utils
+from utils import bluesky_get, compute_hashes, detect_platform, imagehash, pixiv_ajax_get
 from base64 import b64encode
 
 from view import AutoPostView
@@ -14,6 +14,7 @@ from view import AutoPostView
 class PostingCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
     @commands.hybrid_command(name="autopost")
     async def auto_post(self, ctx: commands.Context, link: str, image_num: int | None = None):
         """
@@ -30,31 +31,35 @@ class PostingCog(commands.Cog):
         """
         await ctx.defer()
 
-        if not link.startswith("https://www.pixiv.net"):
-            raise exception.InvalidLink("Invalid Link!")
-
-        ajax_resp = await utils.pixiv_ajax_get(self.bot.client, link)
+        post_data, hq_image, image_name, hashes, embed_fallback, platform = await self.fetch_and_validate_image(
+            link, ctx.guild, image_num
+        )
 
         view = AutoPostView(ctx.author, timeout=300)
 
-        charas_model, series, safety = await self.tags_model_pass(ajax_resp, image_num)
-
-        charas_pixiv, series = self.tags_pixiv_pass(ajax_resp)
-
-        view.characters = ",".join(charas_model | charas_pixiv)
-
-        # Finding forum channel
+        # Run ML model for character/series detection (works for all platforms)
+        charas_model, series, safety = await self.tags_model_pass(hq_image, image_name)
+        view.characters = ",".join(charas_model)
+        
+        # For Pixiv, also check Pixiv tags for additional character/series info
+        if platform == "pixiv":
+            charas_pixiv, series_pixiv = self.tags_pixiv_pass(post_data)
+            view.characters = ",".join(charas_model | charas_pixiv)
+            if series_pixiv:
+                series = series_pixiv
+        
+        # Finding forum channel based on detected series and safety
         if series != "" and safety != "":
             for channel in ctx.guild.channels:
-                if channel.name == series+"-"+safety:
+                if channel.name == series + "-" + safety:
                     view.selected_forum = channel
                     break
 
         embed = discord.Embed(
-        title=f"User Confirmation",
-        description="Are you sure you want to confirm the following options?",
-        color=discord.Color.yellow(),
-        timestamp=datetime.datetime.now()
+            title="User Confirmation",
+            description="Are you sure you want to confirm the following options?",
+            color=discord.Color.yellow(),
+            timestamp=datetime.datetime.now()
         )
 
         chara_desc = view.characters if view.characters != "" else "Please enter a character name."
@@ -63,82 +68,30 @@ class PostingCog(commands.Cog):
         embed.add_field(name="Detected Channel", value=forum_desc, inline=False)
 
         view.message = await ctx.send(embed=embed, view=view)
-        # wait for the view to stop
         await view.wait()
 
-        if view.confirmed:            
-            # Finding Character threads
-            charas = view.characters.lower().replace("_", " ").split(",")
-            charas = [chara.strip() for chara in charas]
-            threads = []
-            thread_names = []
-            group_names = []
-            for thread in view.selected_forum.threads:
-                if thread.name == "All Characters":
-                    threads.append(thread)
-                    thread_names.append("All Characters")
-
-                if thread.name.lower() in charas:
-                    threads.append(thread)
-                    thread_names.append(thread.name.lower())
-                    if len(thread.applied_tags) != 0 and thread.applied_tags[0].name != "Indie" and thread.applied_tags[0].name.lower() + " (group)" not in group_names:
-                        group_names.append(thread.applied_tags[0].name.lower() + " (group)")
-
-                if len(threads) == len(charas)+1:
-                    break  
-            if len(threads) != len(charas)+1:
-                async for thread in view.selected_forum.archived_threads():
-                    if thread.name == "All Characters":
-                        threads.append(thread)
-                        thread_names.append("All Characters")
-
-                    if thread.name.lower() in charas:
-                        threads.append(thread)
-                        thread_names.append(thread.name.lower())
-                        if len(thread.applied_tags) != 0 and thread.applied_tags[0].name != "Indie" and thread.applied_tags[0].name.lower() + " (group)" not in group_names:
-                            group_names.append(thread.applied_tags[0].name.lower() + " (group)")
-
-                    if len(threads) == len(charas)+1:
-                        break
-            
-            if len(group_names) > 0:
-                for group_name in group_names:
-                    for thread in view.selected_forum.threads:
-                        if group_name == thread.name.lower():
-                            threads.append(thread)
-                            thread_names.append(thread.name.lower())
-
-            if len(threads) != len(charas)+len(group_names)+1:
-                missing_threads = ""
-                if "All Characters" not in thread_names:
-                    missing_threads += "- All Characters\n"
-                for chara_name in charas:
-                    if chara_name not in thread_names:
-                        missing_threads += "- "+chara_name+"\n"
-                for group_name in group_names:
-                    if group_name not in thread_names:
-                        missing_threads += "- "+group_name+"\n"
-                raise(exception.ThreadsNotFound(missing_threads))
-            
-            # Check if valid link and replace
-            thread_links = await self.link_check_and_send(link, threads, ctx, view.selected_forum.name, image_num)
+        if view.confirmed:
+            threads, _, _ = await self.find_character_threads(view.selected_forum, view.characters)
+            img = hq_image.read()
+            thread_links = await self.create_embed_and_send(
+                link, post_data, threads, ctx, view.selected_forum.name, 
+                embed_fallback, img, image_name, hashes, image_num, platform
+            )
             
             embed = discord.Embed(
-            title=f"Successfully posted!",
-            description="Your art has been posted in " + view.selected_forum.jump_url,
-            color=discord.Color.green(),
-            timestamp=datetime.datetime.now()
+                title="Successfully posted!",
+                description="Your art has been posted in " + view.selected_forum.jump_url,
+                color=discord.Color.green(),
+                timestamp=datetime.datetime.now()
             )
-
             embed.add_field(name="Threads & Links", value=thread_links)
-
             await view.message.edit(embed=embed)
         else:
             embed = discord.Embed(
-            title=f"Autopost Cancelled",
-            description="The poster has cancelled the post or it has timed out.",
-            color=discord.Color.red(),
-            timestamp=datetime.datetime.now()
+                title="Autopost Cancelled",
+                description="The poster has cancelled the post or it has timed out.",
+                color=discord.Color.red(),
+                timestamp=datetime.datetime.now()
             )
             await view.message.edit(embed=embed)
 
@@ -161,74 +114,26 @@ class PostingCog(commands.Cog):
             Optional argument to select specific image from multiple ones in a post.
         """
         await ctx.defer()
-        # Get rid of whitespace at start and end
-        characters = characters.strip()
-        
-        # Finding Character threads
-        charas = characters.lower().replace("_", " ").split(",")
-        charas = [chara.strip() for chara in charas]
-        threads = []
-        thread_names = []
-        group_names = []
-        for thread in forum_channel.threads:
-            if thread.name == "All Characters":
-                threads.append(thread)
-                thread_names.append("All Characters")
 
-            if thread.name.lower() in charas:
-                threads.append(thread)
-                thread_names.append(thread.name.lower())
-                if len(thread.applied_tags) != 0 and thread.applied_tags[0].name != "Indie" and thread.applied_tags[0].name.lower() + " (group)" not in group_names:
-                    group_names.append(thread.applied_tags[0].name.lower() + " (group)")
-
-            if len(threads) == len(charas)+1:
-                break  
-        if len(threads) != len(charas)+1:
-            async for thread in forum_channel.archived_threads():
-                if thread.name == "All Characters":
-                    threads.append(thread)
-                    thread_names.append("All Characters")
-
-                if thread.name.lower() in charas:
-                    threads.append(thread)
-                    thread_names.append(thread.name.lower())
-                    if len(thread.applied_tags) != 0 and thread.applied_tags[0].name != "Indie" and thread.applied_tags[0].name.lower() + " (group)" not in group_names:
-                        group_names.append(thread.applied_tags[0].name.lower() + " (group)")
-
-                if len(threads) == len(charas)+1:
-                    break
-        
-        if len(group_names) > 0:
-            for group_name in group_names:
-                for thread in forum_channel.threads:
-                    if group_name == thread.name.lower():
-                        threads.append(thread)
-                        thread_names.append(thread.name.lower())
-
-        if len(threads) != len(charas)+len(group_names)+1:
-            missing_threads = ""
-            if "All Characters" not in thread_names:
-                missing_threads += "- All Characters\n"
-            for chara_name in charas:
-                if chara_name not in thread_names:
-                    missing_threads += "- "+chara_name+"\n"
-            for group_name in group_names:
-                if group_name not in thread_names:
-                    missing_threads += "- "+group_name+"\n"
-            raise(exception.ThreadsNotFound(missing_threads))
-        
-        # Check if valid link and replace
-        thread_links = await self.link_check_and_send(link, threads, ctx, forum_channel.name, image_num)
-        
-        embed = discord.Embed(
-        title=f"Successfully posted!",
-        description="Your art has been posted in " + forum_channel.jump_url,
-        color=discord.Color.green(),
-        timestamp=datetime.datetime.now()
+        post_data, hq_image, image_name, hashes, embed_fallback, platform = await self.fetch_and_validate_image(
+            link, ctx.guild, image_num
         )
 
+        threads, _, _ = await self.find_character_threads(forum_channel, characters.strip())
+        
+        img = hq_image.read()
+        thread_links = await self.create_embed_and_send(
+            link, post_data, threads, ctx, forum_channel.name, 
+            embed_fallback, img, image_name, hashes, image_num, platform
+        )
+        
+        embed = discord.Embed(
+            title="Successfully posted!",
+            description="Your art has been posted in " + forum_channel.jump_url,
+            color=discord.Color.green(),
+            timestamp=datetime.datetime.now()
+        )
         embed.add_field(name="Threads & Links", value=thread_links)
-
         await ctx.send(embed=embed)
         
     @post.error
@@ -240,8 +145,7 @@ class PostingCog(commands.Cog):
         color=discord.Color.red(),
         timestamp=datetime.datetime.now()
         )
-        print(error)
-        print(type(error))
+        self.bot.logger.error("Posting command error", exc_info=error)
         if isinstance(error, commands.MissingRequiredArgument):
             embed.description = "Command format is incorrect! Please format the command as `/post gacha {series} {safety_level} {chara1,chara2} {link}`"
             embed.add_field(name="Python error", value=str(error))
@@ -250,7 +154,7 @@ class PostingCog(commands.Cog):
             embed.add_field(name="Python error", value=str(error))
         elif isinstance(error, exception.InvalidLink):
             embed.description = "Invalid link! Please check {link} argument\nSupported Sites:\n\
-                           - Pixiv (<https://www.pixiv.net>) [Autopost]\n- Twitter (<https://twitter.com> or <https://x.com>) [Manual posting only]"
+                           - Pixiv (<https://www.pixiv.net>)\n- Bluesky (<https://bsky.app>)"
         elif isinstance(error, exception.ForumNotFound):
             embed.description = "Could not find correct forum channel! Check that {series} and {safety_level} is correct."
         elif isinstance(error, exception.AccessDenied):
@@ -265,6 +169,8 @@ class PostingCog(commands.Cog):
             embed.description = "The artist has labeled that this image has been AI assisted. As such, it cannot be added to this server."
         elif isinstance(error, exception.CharacterDetectFail):
             embed.description = "The automatic character detector has failed. Please use resubmit the link with the character list."
+        elif isinstance(error, exception.DuplicateImageFound):
+            embed.description = "This image has already been posted to this server!\n" + str(error).lstrip("Command raised an exception: str: ")
         else:
             embed.add_field(name="Python error", value=str(error))
         await ctx.send(embed=embed)
@@ -294,27 +200,40 @@ class PostingCog(commands.Cog):
                         "\nIf that causes issues with posting, please ping Maren about it."), inline=False)
         await ctx.send(embed=embed)
 
-    async def tags_model_pass(self, ajax_resp: dict, image_num: int) -> str | str | str:
-        image_link = ajax_resp['body']['urls']['small']
-        if image_num:
-            image_link = image_link.replace("_p0_", f"_p{image_num-1}_")
-        image_req = await self.bot.client.get(image_link)
-        if image_req.status == 200:
-            image = await image_req.read()
-        else:
-            raise exception.RequestFailed("request to pixiv image failed")
+    async def tags_model_pass(self, hq_image: io.BytesIO, image_name: str) -> tuple[set, str, str]:
+        """
+        Run ML model on image to detect characters, series, and safety rating.
         
-        if ".jpg" in image_link:
-            gradioIn = f"data:image/jpg;base64,{b64encode(image).decode("utf-8")}"
-        elif ".png" in image_link:
-            gradioIn = f"data:image/png;base64,{b64encode(image).decode("utf-8")}"
+        Args:
+            hq_image: BytesIO of the high-quality image
+            image_name: Filename to determine image format
+            
+        Returns:
+            tuple: (characters_set, series_str, safety_str)
+        """
+        # Reset stream position and read image bytes
+        hq_image.seek(0)
+        image = hq_image.read()
+        hq_image.seek(0)  # Reset for later use
+        
+        # Determine format from filename
+        if ".png" in image_name.lower():
+            mime = "image/png"
+        elif ".webp" in image_name.lower():
+            mime = "image/webp"
+        elif ".gif" in image_name.lower():
+            mime = "image/gif"
+        else:
+            mime = "image/jpeg"
+        
+        gradioIn = f"data:{mime};base64,{b64encode(image).decode('utf-8')}"
 
         image_input = {
             "url": gradioIn,
             "is_stream": False
         }
 
-        result = self.bot.gradioClient.predict(
+        result = self.bot.gradio_client.predict(
         image_path=image_input,
         artist_threshold=0.5,
         character_threshold=0.85,
@@ -328,18 +247,18 @@ class PostingCog(commands.Cog):
 
         charas = set()
         for chara in result[1]:
-            if chara in self.bot.char_map:
-                charas.add(self.bot.char_map[chara])
+            if chara in self.bot.config.char_map:
+                charas.add(self.bot.config.char_map[chara])
 
         series = ""
         for series_can in result[2]:
-            if series_can in self.bot.series_map:
-                series = self.bot.series_map[series_can]
+            if series_can in self.bot.config.series_map:
+                series = self.bot.config.series_map[series_can]
                 break
         
         safety = ""
         if len(result[5]) != 0:
-            safety = self.bot.safety_map[next(iter(result[5]))] 
+            safety = self.bot.config.safety_map[next(iter(result[5]))] 
         
         return charas, series, safety
 
@@ -348,56 +267,49 @@ class PostingCog(commands.Cog):
         series = ""
         for tag_dict in ajax_resp['body']['tags']['tags']:
             tag = tag_dict['tag']
-            if tag in self.bot.char_map:
-                chara_tags.add(self.bot.char_map[tag])
-            elif tag in self.bot.series_map:
-                series = self.bot.series_map[tag]
+            if tag in self.bot.config.char_map:
+                chara_tags.add(self.bot.config.char_map[tag])
+            elif tag in self.bot.config.series_map:
+                series = self.bot.config.series_map[tag]
         
         return chara_tags, series
 
+    async def store_image_hash(self, hashes: dict, link: str, platform: str, guild_id: int, thread_id: int, message_id: int) -> None:
+        """Store image hashes in database for duplicate detection."""
+        await self.bot.db.add_image(
+            phash=hashes["phash"],
+            dhash=hashes["dhash"],
+            source_url=link,
+            source_platform=platform,
+            guild_id=guild_id,
+            thread_id=thread_id,
+            message_id=message_id,
+        )
 
-    async def link_check_and_send(self, link: str, threads: list, context: commands.Context, channel_name, image_num: int | None = None) -> str:
+    async def create_embed_and_send(self, link: str, post_data: dict, threads: list, context: commands.Context, channel_name, embed_fallback: bool, hq_image: bytes, image_name: str, hashes: dict, image_num: int | None = None, platform: str = "pixiv") -> str:
         msg = ""
-        phixiv_fallback = False
-        if link.startswith("https://www.pixiv.net"):
-            ajax_resp = await utils.pixiv_ajax_get(self.bot.client, link)
-            if ajax_resp['body']["illustType"] != 2:
-                image_link = ajax_resp['body']['urls']['original']
-                temp = ajax_resp['body']['urls']['original'].split("/")
-                image_name = temp[len(temp)-1]
-                if image_num:
-                    extension = image_link[-4:]
-                    image_link = image_link[:len(image_link)-5]
-                    image_link += str(image_num-1)+extension
-                image_req = await self.bot.client.get(image_link)
-                if image_req.status == 200:
-                    if context.guild.premium_tier > 1: # Tier 2 servers get 50MB upload. Non-boosted servers only get 10MB upload
-                        if int(image_req.headers['Content-Length']) > 52428799: 
-                            phixiv_fallback = True
-                        else:
-                            image = await image_req.read()
-                    else:
-                        if int(image_req.headers['Content-Length']) > 10485759: 
-                            phixiv_fallback = True
-                        else:
-                            image = await image_req.read()
-                else:
-                    raise exception.RequestFailed("request to pixiv image failed")
-            else: # Ugoria video
-                image, image_name = await utils.ugoria_merge(self.bot.client, id)
-                if context.guild.premium_tier > 1:
-                    if len(image) > 52428799: 
-                        phixiv_fallback = True
-                else:
-                    if len(image) > 10485759:
-                        phixiv_fallback = True
+        
+        # Build embed based on platform
+        if platform == "pixiv":
+            embed_title = post_data['body']["title"]
+            embed_url = post_data['body']["extraData"]["meta"]["canonical"]
+            embed_author_name = "@" + post_data['body']['userName']
+            embed_author_url = "https://www.pixiv.net/users/" + post_data['body']["userId"]
+            fallback_link = link.replace("pixiv", "phixiv")
+        elif platform == "bluesky":
+            embed_title = post_data.get("title", "Bluesky Post")
+            embed_url = post_data.get("url", link)
+            embed_author_name = "@" + post_data.get("author_handle", "unknown")
+            embed_author_url = post_data.get("author_url", link)
+            fallback_link = link  # No phixiv equivalent for Bluesky
+        else:
+            embed_title = "Art Post"
+            embed_url = link
+            embed_author_name = "Unknown"
+            embed_author_url = link
+            fallback_link = link
 
-            embed_title = ajax_resp['body']["title"]
-            embed_url = ajax_resp['body']["extraData"]["meta"]["canonical"]
-            embed_author_name = "@"+ ajax_resp['body']['userName']
-            embed_author_url = "https://www.pixiv.net/users/" + ajax_resp['body']["userId"]
-
-        if not phixiv_fallback:
+        if not embed_fallback:
             embed = discord.Embed(
             title=embed_title,
             url=embed_url,
@@ -409,33 +321,199 @@ class PostingCog(commands.Cog):
             embed.set_image(url="attachment://"+image_name)
             embed.set_footer(text="Maren's Art Bot Services")
         else:
-            if image_num:
-                embed = "Poster: "+ context.author.name + "\n" + link.replace("pixiv", "phixiv") + "/" + str(image_num)
+            if image_num and platform == "pixiv":
+                embed = "Poster: "+ context.author.name + "\n" + fallback_link + "/" + str(image_num)
             else:
-                embed = "Poster: "+ context.author.name + "\n" + link.replace("pixiv", "phixiv")
+                embed = "Poster: "+ context.author.name + "\n" + fallback_link
 
+        first_post = None
         for thread in threads:
-            if not phixiv_fallback:
-                post = await thread.send(content=f"<{link}>",embed=embed, file=discord.File(io.BytesIO(image),filename=image_name))
+            if not embed_fallback:
+                post = await thread.send(content=f"<{link}>",embed=embed, file=discord.File(io.BytesIO(hq_image),filename=image_name))
             else:
                 post = await thread.send(content=embed)
+            
+            # Store first post for hash tracking
+            if first_post is None:
+                first_post = post
+            
             if thread == threads[len(threads)-1]:
                 msg += "- " + post.jump_url
             else:
                 msg += "- " + post.jump_url + "\n"
 
+        # Store image hash in database after successful posting
+        if first_post is not None:
+            await self.store_image_hash(
+                hashes=hashes,
+                link=link,
+                platform=platform,
+                guild_id=context.guild.id,
+                thread_id=first_post.channel.id,
+                message_id=first_post.id,
+            )
+
         await self.send_webhook(embed, post, channel_name, link)
 
-        if phixiv_fallback:
-            msg += "\n**NOTE:** Older embed system (Phixiv) has been used due to the image being too big to upload directly."
+        if embed_fallback:
+            if platform == "pixiv":
+                msg += "\n**NOTE:** Older embed system (Phixiv) has been used due to the image being too big to upload directly."
+            else:
+                msg += "\n**NOTE:** Image was too large to upload directly. Linked version shown instead."
         return msg
     
     async def send_webhook(self, embed, post: discord.Message, channel_name: str, link: str):
-        if channel_name in self.bot.webhooks:
+        if channel_name in self.bot.config.webhooks:
             embed.set_image(url=post.embeds[0].image.url)
-            for webhook_env in self.bot.webhooks[channel_name]:
+            for webhook_env in self.bot.config.webhooks[channel_name]:
                 await self.bot.client.post(os.getenv(webhook_env), data ={"payload_json":  json.dumps({"content": f"<{link}>", "embeds": [embed.to_dict()]})})
+    
+    async def check_duplicate(self, image: io.BytesIO, guild_id: int) -> tuple[dict, list]:
+        """
+        Check if image is a duplicate and return hashes.
+        Returns (hashes_dict, list_of_similar_images).
+        Raises DuplicateImageFound if duplicate exists in the same guild.
+        """
+        # Reset stream position for reading
+        image.seek(0)
+        hashes = compute_hashes(image)
+        image.seek(0)  # Reset for later use
+        
+        # Convert ImageHash objects to hex strings for storage/comparison
+        hash_strings = {
+            "phash": str(hashes["phash"]),
+            "dhash": str(hashes["dhash"]),
+        }
+        
+        # Find similar images in database
+        similar = await self.bot.db.find_similar(hash_strings["phash"])
+        
+        # Filter to same guild and check if truly similar using phash + dhash
+        duplicates = []
+        for img in similar:
+            if img.guild_id == guild_id:
+                # Double-check with dhash for accuracy
+                stored_phash = imagehash.hex_to_hash(img.phash)
+                stored_dhash = imagehash.hex_to_hash(img.dhash)
+                
+                phash_similar = (hashes["phash"] - stored_phash) <= 8
+                dhash_similar = (hashes["dhash"] - stored_dhash) <= 10
+                
+                if phash_similar and dhash_similar:
+                    duplicates.append(img)
+        
+        return hash_strings, duplicates
 
+    async def fetch_and_validate_image(self, link: str, guild: discord.Guild, image_num: int | None = None) -> tuple[dict, io.BytesIO, str, dict, bool, str]:
+        """
+        Validate link, fetch image from supported platform, check for duplicates, and determine fallback mode.
+        
+        Returns:
+            tuple: (post_data, hq_image, image_name, hashes, embed_fallback, platform)
+        
+        Raises:
+            InvalidLink: If link is not from a supported platform
+            DuplicateImageFound: If image was already posted to this guild
+        """
+        platform = detect_platform(link)
+        embed_fallback = False
+        
+        if platform == "pixiv":
+            post_data, hq_image, image_name = await pixiv_ajax_get(self.bot, link, image_num)
+        elif platform == "bluesky":
+            post_data, hq_image, image_name = await bluesky_get(
+                self.bot,
+                link, 
+                image_num,
+            )
+        else:
+            raise exception.InvalidLink("Invalid Link! Supported platforms: Pixiv, Bluesky")
+
+        # Check for duplicates before proceeding
+        hashes, duplicates = await self.check_duplicate(hq_image, guild.id)
+        if duplicates:
+            dup = duplicates[0]
+            raise exception.DuplicateImageFound(
+                f"Post: https://discord.com/channels/{dup.guild_id}/{dup.thread_id}/{dup.message_id}"
+            )
+
+        # Determine if we need embed fallback based on server boost level
+        max_size = 52428799 if guild.premium_tier > 1 else 10485759
+        if hq_image.getbuffer().nbytes > max_size:
+            embed_fallback = True
+
+        return post_data, hq_image, image_name, hashes, embed_fallback, platform
+
+    async def find_character_threads(self, forum_channel: discord.ForumChannel, characters: str) -> tuple[list, list, list]:
+        """
+        Find all character threads, group threads, and "All Characters" thread in forum.
+        
+        Args:
+            forum_channel: The forum channel to search
+            characters: Comma-separated character names
+            
+        Returns:
+            tuple: (threads, thread_names, group_names)
+            
+        Raises:
+            ThreadsNotFound: If any required threads are missing
+        """
+        charas = characters.lower().replace("_", " ").split(",")
+        charas = [chara.strip() for chara in charas]
+        
+        threads = []
+        thread_names = []
+        group_names = []
+        
+        # Helper to process a thread
+        def process_thread(thread):
+            if thread.name == "All Characters" and "All Characters" not in thread_names:
+                threads.append(thread)
+                thread_names.append("All Characters")
+
+            if thread.name.lower() in charas and thread.name.lower() not in thread_names:
+                threads.append(thread)
+                thread_names.append(thread.name.lower())
+                if (len(thread.applied_tags) != 0 and 
+                    thread.applied_tags[0].name != "Indie" and 
+                    thread.applied_tags[0].name.lower() + " (group)" not in group_names):
+                    group_names.append(thread.applied_tags[0].name.lower() + " (group)")
+        
+        # Search active threads
+        for thread in forum_channel.threads:
+            process_thread(thread)
+            if len(threads) == len(charas) + 1:
+                break
+        
+        # Search archived threads if needed
+        if len(threads) != len(charas) + 1:
+            async for thread in forum_channel.archived_threads():
+                process_thread(thread)
+                if len(threads) == len(charas) + 1:
+                    break
+        
+        # Find group threads
+        if group_names:
+            for group_name in group_names:
+                for thread in forum_channel.threads:
+                    if group_name == thread.name.lower() and thread.name.lower() not in thread_names:
+                        threads.append(thread)
+                        thread_names.append(thread.name.lower())
+
+        # Check for missing threads
+        if len(threads) != len(charas) + len(group_names) + 1:
+            missing = []
+            if "All Characters" not in thread_names:
+                missing.append("All Characters")
+            for chara_name in charas:
+                if chara_name not in thread_names:
+                    missing.append(chara_name)
+            for group_name in group_names:
+                if group_name not in thread_names:
+                    missing.append(group_name)
+            raise exception.ThreadsNotFound("\n".join(f"- {name}" for name in missing))
+        
+        return threads, thread_names, group_names
 
 async def setup(bot):
     await bot.add_cog(PostingCog(bot))

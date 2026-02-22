@@ -210,3 +210,5 @@ __marimo__/
 twt_cookies.json
 configs/
 .idea/
+.github/
+.vscode/

@@ -1,4 +1,3 @@
-import discord
 from discord.ext import commands
 
 class InvalidLink(commands.CommandInvokeError):
@@ -51,4 +50,8 @@ class TagsNotFound(commands.CommandInvokeError):
 
 class CharacterDetectFail(commands.CommandInvokeError):
     """Automatic Character Detection has failed."""
+    pass
+
+class DuplicateImageFound(commands.CommandInvokeError):
+    """Image has already been posted to the server."""
     pass

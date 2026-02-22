@@ -140,7 +140,7 @@ class BaseModal(discord.ui.Modal):
         return self._interaction
     
 class CharaEditModel(BaseModal, title="Character Edit Modal"):
-    characters = discord.ui.TextInput(label="Characters", placeholder="Enter an error message", min_length=1, max_length=100)
+    characters = discord.ui.TextInput(label="Characters", placeholder="Enter the new character names, separated by commas", min_length=1, max_length=100)
 
     def __init__(self, view: AutoPostView):
         super().__init__()

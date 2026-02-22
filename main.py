@@ -4,21 +4,22 @@ import os
 import traceback
 import typing
 import aiohttp
-import json
 from gradio_client import Client as GraioClient
+from atproto import AsyncClient as BskyClient
+from config import Config
+from db.db import Database
 
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
 
-class CustomBot(commands.Bot):
+class ArtBot(commands.Bot):
     client: aiohttp.ClientSession
-    gradioClient = GraioClient("Halfabumcake/camie-test")
-    webhooks = {}
-    char_map = {}
-    series_map = {}
-    safety_map = {}
+    gradio_client: GraioClient
+    bsky_client: BskyClient
+    config: Config
+    db: Database
     _uptime: datetime.datetime = datetime.datetime.now()
 
     def __init__(self, prefix: str, ext_dir: str, *args: typing.Any, **kwargs: typing.Any) -> None:
@@ -52,35 +53,23 @@ class CustomBot(commands.Bot):
         self.logger.info(f"Logged in as {self.user} ({self.user.id})")
 
     async def setup_hook(self) -> None:
-        cookie = os.getenv("PIXIV_COOKIE")
-        self.client = aiohttp.ClientSession(cookies={'PHPSESSID': cookie},headers={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0", "Referer": "https://www.pixiv.net/"})
-        # load webhook mappings (maps channel name -> [ENV_VAR_NAMES])
-        self.webhooks = json.load(open("./configs/webhooks.json", "r"))
-        # load optional character mapping (danbooru-tag -> canonical thread name)
-        char_map_path = "./configs/char_map.json"
-        if os.path.exists(char_map_path):
-            try:
-                self.char_map = json.load(open(char_map_path, "r"))
-            except Exception:
-                self.char_map = {}
+        self.client = aiohttp.ClientSession(cookies={'PHPSESSID': os.getenv("PIXIV_COOKIE")},headers={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0", "Referer": "https://www.pixiv.net/"})
+        self.gradio_client = GraioClient("Halfabumcake/camie-test")
+        self.config = Config(os.getenv("CONFIG_PATH"))
+        self.db = Database(os.getenv("SQLITE_PATH"))
+        
+        # Initialize Bluesky client if credentials are provided
+        bsky_identifier = os.getenv("BLUESKY_IDENTIFIER")
+        bsky_password = os.getenv("BLUESKY_APP_PASSWORD")
+        if bsky_identifier and bsky_password:
+            self.bsky_client = BskyClient()
+            await self.bsky_client.login(bsky_identifier, bsky_password)
+            self.logger.info("Logged in to Bluesky")
         else:
-            self.char_map = {}
-        series_map_path = "./configs/series_map.json"
-        if os.path.exists(series_map_path):
-            try:
-                self.series_map = json.load(open(series_map_path, "r"))
-            except Exception:
-                self.series_map = {}
-        else:
-            self.series_map = {}
-        safety_map_path = "./configs/safety_map.json"
-        if os.path.exists(safety_map_path):
-            try:
-                self.safety_map = json.load(open(safety_map_path, "r"))
-            except Exception:
-                self.safety_map = {}
-        else:
-            self.safety_map = {}
+            self.bsky_client = None
+            self.logger.warning("Bluesky credentials not provided, Bluesky support disabled")
+        
+        await self.db.connect()
         await self._load_extensions()
         if not self.synced:
             await self.tree.sync()
@@ -88,8 +77,10 @@ class CustomBot(commands.Bot):
             self.logger.info("Synced command tree")
 
     async def close(self) -> None:
-        await super().close()
         await self.client.close()
+        await self.gradio_client.close()
+        await self.db.close()
+        await super().close()
 
     def run(self, *args: typing.Any, **kwargs: typing.Any) -> None:
         load_dotenv()
@@ -111,7 +102,7 @@ class CustomBot(commands.Bot):
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
-    bot = CustomBot(prefix="!", ext_dir="cogs")
+    bot = ArtBot(prefix="!", ext_dir="cogs")
     bot.run()
 
 

@@ -139,8 +139,7 @@ class ThreadCog(commands.Cog):
         color=discord.Color.red(),
         timestamp=datetime.datetime.utcnow()
         )
-        print(error)
-        print(type(error))
+        self.bot.logger.error("Thread create command error", exc_info=error)
         if isinstance(error, commands.MissingRequiredArgument):
             embed.description = "Command format is incorrect! Please format the command as `/thread create {channel} {name} {embed_link} {image_file}`"
             embed.add_field(name="Python error", value=str(error))
@@ -355,8 +354,7 @@ class ThreadCog(commands.Cog):
         color=discord.Color.red(),
         timestamp=datetime.datetime.utcnow()
         )
-        print(error)
-        print(type(error))
+        self.bot.logger.error("Thread edit command error", exc_info=error)
         if isinstance(error, commands.MissingRequiredArgument):
             embed.description = "Command format is incorrect! Please format the command as `/edit thread {series} {safety_level} {chara1,chara2} {link}`"
             embed.add_field(name="Python error", value=str(error))
