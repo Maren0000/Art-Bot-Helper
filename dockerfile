@@ -3,5 +3,6 @@ FROM python:3.14.2-slim
 WORKDIR /app
 COPY ./requirements.txt /app
 
+ENV PIP_NO_BINARY=numpy
 RUN pip install --upgrade pip
-RUN PIP_NO_BINARY=numpy pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
