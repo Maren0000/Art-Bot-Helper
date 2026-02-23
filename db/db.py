@@ -86,4 +86,6 @@ class Database:
         return image
 
     async def close(self):
+        conn = Tortoise.get_connection("default")
+        await conn.execute_query("PRAGMA wal_checkpoint(TRUNCATE);")
         await Tortoise.close_connections()
