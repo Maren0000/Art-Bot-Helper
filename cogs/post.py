@@ -499,6 +499,13 @@ class PostingCog(commands.Cog):
                     if group_name == thread.name.lower() and thread.name.lower() not in thread_names:
                         threads.append(thread)
                         thread_names.append(thread.name.lower())
+                        break
+                if group_name not in thread_names:
+                    async for thread in forum_channel.archived_threads():
+                        if group_name == thread.name.lower() and thread.name.lower() not in thread_names:
+                            threads.append(thread)
+                            thread_names.append(thread.name.lower())
+                            break
 
         # Check for missing threads
         if len(threads) != len(charas) + len(group_names) + 1:

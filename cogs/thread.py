@@ -8,6 +8,71 @@ class ThreadCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    async def create_thread_in_channel(
+        self,
+        ctx: commands.Context,
+        forum_channel: discord.channel.ForumChannel,
+        name: str,
+        embed_link: str | None = None,
+        image_file: discord.Attachment | None = None,
+        tags: str | None = None,
+    ) -> discord.Thread:
+        name = name.strip()
+        normalized_name = name.replace("_", " ")
+        normalized_key = normalized_name.casefold()
+
+        if not embed_link and not image_file:
+            raise exception.TooLittleArguments("embed link and image file are missing")
+
+        if embed_link and image_file:
+            raise exception.TooManyArguments("embed link and image file both exist")
+
+        for thread in forum_channel.threads:
+            if thread.name.casefold() == normalized_key:
+                raise exception.ThreadAlreadyExists("already exists")
+        async for thread in forum_channel.archived_threads():
+            if thread.name.casefold() == normalized_key:
+                raise exception.ThreadAlreadyExists("already exists")
+
+        if embed_link:
+            thread = (
+                await forum_channel.create_thread(
+                    name=normalized_name, content=embed_link, auto_archive_duration=10080
+                )
+            ).thread
+        else:
+            embed_channel = await ctx.guild.fetch_channel("1392350974852464700")
+            image = await embed_channel.send(file=(await image_file.to_file()))
+            thread = (
+                await forum_channel.create_thread(
+                    name=normalized_name,
+                    content=image.attachments[0].url,
+                    auto_archive_duration=10080,
+                )
+            ).thread
+
+        if tags is not None:
+            tags_list = tags.lower().replace("_", " ").split(",")
+            tags_list = [tag.strip() for tag in tags_list]
+            discord_tags = []
+            discord_tag_names = []
+            for tag in tags_list:
+                for discord_tag in forum_channel.available_tags:
+                    if discord_tag.name.lower() == tag:
+                        discord_tags.append(discord_tag)
+                        discord_tag_names.append(discord_tag.name)
+
+            if len(tags_list) != len(discord_tag_names):
+                missing_tags = ""
+                for tag in tags_list:
+                    if tag not in discord_tag_names:
+                        missing_tags += "- " + tag + "\n"
+                raise exception.ThreadsNotFound(missing_tags)
+
+            await thread.add_tags(*discord_tags, reason="Thread create command")
+
+        return thread
+
     @commands.hybrid_group(name="thread")
     async def thread(self, ctx: commands.Context):
         """
@@ -46,49 +111,14 @@ class ThreadCog(commands.Cog):
         tags: str
             List of tags to add to the thread. Case-insensitive and comma seperated.
         """
-        name = name.strip()
-
-        if not embed_link and not image_file:
-            raise(exception.TooLittleArguments("embed link and image file are missing"))
-
-        if embed_link and image_file:
-            raise(exception.TooManyArguments("embed link and image file both exist"))
-        
-        # Verifying that the same thread does not exist
-        for thread in forum_channel.threads:
-            if thread.name.lower() == name:
-                raise(exception.ThreadAlreadyExists("already exists"))
-        async for thread in forum_channel.archived_threads():
-            if thread.name.lower() == name:
-                raise(exception.ThreadAlreadyExists("already exists"))
-
-        if embed_link:
-            thread = (await forum_channel.create_thread(name=name.replace("_", " "), content=embed_link, auto_archive_duration=10080)).thread
-        if image_file:
-            embed_channel = await ctx.guild.fetch_channel("1392350974852464700")
-            image = await embed_channel.send(file=(await image_file.to_file()))
-            thread = (await forum_channel.create_thread(name=name.replace("_", " "), content=image.attachments[0].url, auto_archive_duration=10080)).thread
-            
-
-        if tags != None:
-            tags = tags.lower().replace("_", " ").split(",")
-            tags = [tag.strip() for tag in tags]
-            discord_tags = []
-            discord_tag_names = []
-            for tag in tags:
-                for discord_tag in forum_channel.available_tags:
-                    if discord_tag.name.lower() == tag:
-                        discord_tags.append(discord_tag)
-                        discord_tag_names.append(discord_tag.name)
-
-            if len(tags) != len(discord_tag_names):
-                missing_tags = ""
-                for tag in tags:
-                    if tag not in discord_tag_names:
-                        missing_tags += "- "+tag+"\n"
-                raise(exception.ThreadsNotFound(missing_tags))
-
-            await thread.add_tags(*discord_tags, reason="Thread create command")
+        thread = await self.create_thread_in_channel(
+            ctx,
+            forum_channel,
+            name,
+            embed_link=embed_link,
+            image_file=image_file,
+            tags=tags,
+        )
 
         embed = discord.Embed(
         title=f"Successfully created {thread.name} in {forum_channel.name}!",
@@ -96,6 +126,68 @@ class ThreadCog(commands.Cog):
         color=discord.Color.green(),
         timestamp=datetime.datetime.utcnow()
         )
+        await ctx.send(embed=embed)
+
+    @create.command(name="postall")
+    async def postall(self, ctx: commands.Context, series: str, name: str, embed_link: str | None = None, image_file: discord.Attachment | None = None, tags: str | None = None):
+        """
+        Create a thread in all safety channels for a series.
+
+        Parameters
+        ----------
+        ctx: commands.Context
+            The context of the command invocation
+        series: str
+            Series name used to match forum channels by `{series}-{safety}`.
+        name: str
+            Name of the thread. THIS IS CASE-SENSITIVE FOR THIS COMMAND.
+        embed_link: str
+            Link of an image to embed in the first post. Use either this or image_file.
+        image_file: discord.Attachment
+            Image upload to embed in the first post. Use either embed_link or this.
+        tags: str
+            List of tags to add to the thread. Case-insensitive and comma seperated.
+        """
+        series = series.strip()
+        safety_levels = set(self.bot.config.safety_map.values())
+        target_names = {f"{series}-{safety}" for safety in safety_levels}
+
+        forum_channels = [
+            channel
+            for channel in ctx.guild.channels
+            if isinstance(channel, discord.ForumChannel) and channel.name in target_names
+        ]
+
+        if not forum_channels:
+            raise exception.ForumNotFound("forum channels not found")
+
+        created = []
+        skipped = []
+        for forum_channel in forum_channels:
+            try:
+                thread = await self.create_thread_in_channel(
+                    ctx,
+                    forum_channel,
+                    name,
+                    embed_link=embed_link,
+                    image_file=image_file,
+                    tags=tags,
+                )
+                created.append(f"{forum_channel.name}: {thread.jump_url}")
+            except exception.ThreadAlreadyExists:
+                skipped.append(forum_channel.name)
+
+        if not created:
+            raise exception.ThreadAlreadyExists("already exists")
+
+        embed = discord.Embed(
+            title=f"Successfully created {name} in series {series}",
+            color=discord.Color.green(),
+            timestamp=datetime.datetime.utcnow(),
+        )
+        embed.add_field(name="Created", value="\n".join(created), inline=False)
+        if skipped:
+            embed.add_field(name="Skipped", value="\n".join(skipped), inline=False)
         await ctx.send(embed=embed)
 
     @create.command()
@@ -132,6 +224,7 @@ class ThreadCog(commands.Cog):
     # Tag errors fail here for some reason?
     @tag.error
     @post.error
+    @postall.error
     async def create_error(self, ctx: commands.Context, error: commands.CommandError):
         embed = discord.Embed(
         title=f"Error in command {ctx.command}!",
@@ -388,6 +481,13 @@ class ThreadCog(commands.Cog):
                         "\n`{embed_link}`: URL to an image for the embed preview. Use this or the option below."
                         "\n`{image_file}`: Image attachment for the embed preview. Use this or the option above."
                         "\n`{tags}`: Tags to add to the new thread. Be sure the tag exists before adding them. You can include multiple tags by using commas."), inline=False)
+        embed.add_field(name="/thread create postall", value=("Command for creating the same thread in all safety channels for a series."
+                "\nSyntax: `/thread create postall {series} {name} {embed_link} {image_file} {tags}`"
+                "\n`{series}`: Series name used to match forum channels by `{series}-{safety}`."
+                "\n`{name}`: Name of the new thread. Note that this is **CASE-SENSITIVE** so please try to use the correct official name with proper casing and spaces."
+                "\n`{embed_link}`: URL to an image for the embed preview. Use this or the option below."
+                "\n`{image_file}`: Image attachment for the embed preview. Use this or the option above."
+                "\n`{tags}`: Tags to add to the new thread. Be sure the tag exists before adding them. You can include multiple tags by using commas."), inline=False)
         embed.add_field(name="/thread create tag", value=("Command for creating threads in the art forum channels."
                         "\nSyntax: `/thread create post {forum_channel} {name} {emote}`"
                         "\n`{forum_channel}`: Pick from the available list."
