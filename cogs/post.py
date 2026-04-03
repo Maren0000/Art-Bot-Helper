@@ -73,11 +73,11 @@ class PostingCog(commands.Cog):
         if view.confirmed:
             threads, _, _ = await self.find_character_threads(view.selected_forum, view.characters)
             img = hq_image.read()
-            thread_links = await self.create_embed_and_send(
-                link, post_data, threads, ctx, view.selected_forum.name, 
+            thread_links, post_id = await self.create_embed_and_send(
+                link, post_data, threads, ctx, view.selected_forum.name,
                 embed_fallback, img, image_name, hashes, image_num, platform
             )
-            
+
             embed = discord.Embed(
                 title="Successfully posted!",
                 description="Your art has been posted in " + view.selected_forum.jump_url,
@@ -85,6 +85,8 @@ class PostingCog(commands.Cog):
                 timestamp=datetime.datetime.now()
             )
             embed.add_field(name="Threads & Links", value=thread_links)
+            if post_id is not None:
+                embed.set_footer(text=f"Post ID: {post_id} — use /deletepost to remove from database")
             await view.message.edit(embed=embed)
         else:
             embed = discord.Embed(
@@ -120,13 +122,13 @@ class PostingCog(commands.Cog):
         )
 
         threads, _, _ = await self.find_character_threads(forum_channel, characters.strip())
-        
+
         img = hq_image.read()
-        thread_links = await self.create_embed_and_send(
-            link, post_data, threads, ctx, forum_channel.name, 
+        thread_links, post_id = await self.create_embed_and_send(
+            link, post_data, threads, ctx, forum_channel.name,
             embed_fallback, img, image_name, hashes, image_num, platform
         )
-        
+
         embed = discord.Embed(
             title="Successfully posted!",
             description="Your art has been posted in " + forum_channel.jump_url,
@@ -134,6 +136,8 @@ class PostingCog(commands.Cog):
             timestamp=datetime.datetime.now()
         )
         embed.add_field(name="Threads & Links", value=thread_links)
+        if post_id is not None:
+            embed.set_footer(text=f"Post ID: {post_id} — use /deletepost to remove from database")
         await ctx.send(embed=embed)
         
     @post.error
@@ -198,6 +202,52 @@ class PostingCog(commands.Cog):
                         "\nMust be a number (Ex. 2 for 2nd image in the post)."), inline=False)
         embed.add_field(name="Note on Tags", value=("Please note that if a character thread has a tag, the default behaviour is to find a group thread for that tag."
                         "\nIf that causes issues with posting, please ping Maren about it."), inline=False)
+        await ctx.send(embed=embed)
+
+    @commands.hybrid_command(name="deletepost")
+    async def delete_post(self, ctx: commands.Context, post_id: int):
+        """
+        Remove a post entry from the database by its ID.
+
+        Parameters
+        ----------
+        ctx: commands.Context
+            The context of the command invocation
+        post_id: int
+            The database ID of the post to delete (shown in the footer of the success embed when posting).
+        """
+        await ctx.defer()
+        deleted = await self.bot.db.delete_image(post_id)
+        if deleted:
+            embed = discord.Embed(
+                title="Post Deleted",
+                description=f"Post ID **{post_id}** has been removed from the database.",
+                color=discord.Color.green(),
+                timestamp=datetime.datetime.now()
+            )
+        else:
+            embed = discord.Embed(
+                title="Post Not Found",
+                description=f"No post with ID **{post_id}** exists in the database.",
+                color=discord.Color.red(),
+                timestamp=datetime.datetime.now()
+            )
+        await ctx.send(embed=embed)
+
+    @delete_post.error
+    async def delete_post_error(self, ctx: commands.Context, error: commands.CommandError):
+        embed = discord.Embed(
+            title="Error in command deletepost!",
+            description="Unknown error occurred while using the command",
+            color=discord.Color.red(),
+            timestamp=datetime.datetime.now()
+        )
+        if isinstance(error, commands.MissingRequiredArgument):
+            embed.description = "Please provide a post ID. Usage: `/deletepost {post_id}`"
+        elif isinstance(error, commands.BadArgument):
+            embed.description = "Post ID must be a number."
+        else:
+            embed.add_field(name="Python error", value=str(error))
         await ctx.send(embed=embed)
 
     async def tags_model_pass(self, hq_image: io.BytesIO, image_name: str) -> tuple[set, str, str]:
@@ -274,9 +324,9 @@ class PostingCog(commands.Cog):
         
         return chara_tags, series
 
-    async def store_image_hash(self, hashes: dict, link: str, platform: str, guild_id: int, thread_id: int, message_id: int) -> None:
-        """Store image hashes in database for duplicate detection."""
-        await self.bot.db.add_image(
+    async def store_image_hash(self, hashes: dict, link: str, platform: str, guild_id: int, thread_id: int, message_id: int):
+        """Store image hashes in database for duplicate detection. Returns the created Image."""
+        return await self.bot.db.add_image(
             phash=hashes["phash"],
             dhash=hashes["dhash"],
             source_url=link,
@@ -343,8 +393,9 @@ class PostingCog(commands.Cog):
                 msg += "- " + post.jump_url + "\n"
 
         # Store image hash in database after successful posting
+        post_id = None
         if first_post is not None:
-            await self.store_image_hash(
+            image = await self.store_image_hash(
                 hashes=hashes,
                 link=link,
                 platform=platform,
@@ -352,6 +403,7 @@ class PostingCog(commands.Cog):
                 thread_id=first_post.channel.id,
                 message_id=first_post.id,
             )
+            post_id = image.id
 
         await self.send_webhook(embed, post, channel_name, link)
 
@@ -360,7 +412,7 @@ class PostingCog(commands.Cog):
                 msg += "\n**NOTE:** Older embed system (Phixiv) has been used due to the image being too big to upload directly."
             else:
                 msg += "\n**NOTE:** Image was too large to upload directly. Linked version shown instead."
-        return msg
+        return msg, post_id
     
     async def send_webhook(self, embed, post: discord.Message, channel_name: str, link: str):
         if channel_name in self.bot.config.webhooks:

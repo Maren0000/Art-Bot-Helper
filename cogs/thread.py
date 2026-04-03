@@ -148,7 +148,7 @@ class ThreadCog(commands.Cog):
         tags: str
             List of tags to add to the thread. Case-insensitive and comma seperated.
         """
-        series = series.strip()
+        series = series.strip().lower()
         safety_levels = set(self.bot.config.safety_map.values())
         target_names = {f"{series}-{safety}" for safety in safety_levels}
 
