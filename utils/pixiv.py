@@ -73,7 +73,8 @@ async def pixiv_ajax_get(bot, link: str, image_num: int | None) -> tuple[dict, i
             temp = ajax_resp["body"]["urls"]["original"].split("/")
             image_name = temp[len(temp) - 1]
             if image_num:
-                image_link = image_link.replace("_p0_", f"_p{image_num-1}_")
+                image_link = image_link.replace("_p0.", f"_p{image_num-1}.")
+                image_name = image_name.replace("_p0.", f"_p{image_num-1}.")
             image_req = await bot.client.get(image_link)
             if image_req.status == 200:
                 image = await image_req.read()

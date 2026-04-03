@@ -1,9 +1,11 @@
+import asyncio
 import datetime
 import logging
 import os
 import traceback
 import typing
 import aiohttp
+import uvicorn
 from gradio_client import Client as GraioClient
 from atproto import AsyncClient as BskyClient
 from config import Config
@@ -100,10 +102,38 @@ class ArtBot(commands.Bot):
         return datetime.datetime.now() - self._uptime
 
 
-def main() -> None:
+async def run_combined() -> None:
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
+
     bot = ArtBot(prefix="!", ext_dir="cogs")
-    bot.run()
+
+    web_config = uvicorn.Config(
+        "web.app:app",
+        host=os.getenv("WEB_HOST", "127.0.0.1"),
+        port=int(os.getenv("WEB_PORT", "8000")),
+        log_level="warning",
+    )
+    web_server = uvicorn.Server(web_config)
+    # Let asyncio handle SIGINT/SIGTERM rather than uvicorn installing its own handlers.
+    web_server.install_signal_handlers = lambda: None
+
+    async with bot:
+        await bot.login(str(os.getenv("TOKEN", "")))
+        # Share the bot's Config with the web app so edits reload immediately.
+        from web.app import set_bot_config
+        set_bot_config(bot.config)
+        await asyncio.gather(
+            bot.connect(),
+            web_server.serve(),
+        )
+
+
+def main() -> None:
+    load_dotenv()
+    try:
+        asyncio.run(run_combined())
+    except (discord.LoginFailure, KeyboardInterrupt):
+        logging.getLogger("ArtBot").info("Exiting...")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,287 @@
+{% extends "base.html" %}
+
+{% block title %}Images — Art Bot Admin{% endblock %}
+{% block page_title %}Image Database{% endblock %}
+
+{% block content %}
+
+<!-- Stats cards -->
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700/60 px-5 py-4
+                border-l-4" style="border-left-color: #00bed4">
+        <p class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-2">Total Images</p>
+        <p class="text-3xl font-black text-gray-900 dark:text-gray-100">{{ stats.total | default(0) }}</p>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700/60 px-5 py-4
+                border-l-4 border-l-blue-400">
+        <p class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-2">Pixiv</p>
+        <p class="text-3xl font-black text-blue-600 dark:text-blue-400">{{ stats.by_platform.get('pixiv', 0) }}</p>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700/60 px-5 py-4
+                border-l-4 border-l-sky-400">
+        <p class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-2">Bluesky</p>
+        <p class="text-3xl font-black text-sky-500 dark:text-sky-400">{{ stats.by_platform.get('bluesky', 0) }}</p>
+    </div>
+    <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700/60 px-5 py-4
+                border-l-4 border-l-violet-500">
+        <p class="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-2">Servers</p>
+        <p class="text-3xl font-black text-violet-600 dark:text-violet-400">{{ stats.guilds | default(0) }}</p>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700/60 px-5 py-4 mb-4">
+    <form method="get" action="/images" class="flex flex-wrap items-end gap-3" data-live-search>
+        <div class="flex-1 min-w-52">
+            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Search URL</label>
+            <input type="text" name="search" value="{{ filter_search }}" placeholder="pixiv.net/artworks/..."
+                   class="w-full px-3 py-2 text-sm rounded-lg transition-colors
+                          border border-gray-200 dark:border-gray-600
+                          bg-gray-50 dark:bg-gray-700/50
+                          text-gray-900 dark:text-gray-100
+                          placeholder-gray-400 dark:placeholder-gray-500
+                          focus:bg-white dark:focus:bg-gray-700
+                          focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent">
+        </div>
+        <div>
+            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Platform</label>
+            <select name="platform"
+                    class="px-3 py-2 text-sm rounded-lg transition-colors
+                           border border-gray-200 dark:border-gray-600
+                           bg-gray-50 dark:bg-gray-700/50
+                           text-gray-900 dark:text-gray-100
+                           focus:bg-white dark:focus:bg-gray-700
+                           focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent">
+                <option value="">All platforms</option>
+                {% for p in platforms %}
+                <option value="{{ p }}" {% if filter_platform == p %}selected{% endif %}>{{ p | capitalize }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1.5">Guild ID</label>
+            <input type="text" name="guild_id" value="{{ filter_guild }}" placeholder="Discord server ID"
+                   class="px-3 py-2 text-sm rounded-lg transition-colors font-mono w-48
+                          border border-gray-200 dark:border-gray-600
+                          bg-gray-50 dark:bg-gray-700/50
+                          text-gray-900 dark:text-gray-100
+                          placeholder-gray-400 dark:placeholder-gray-500
+                          focus:bg-white dark:focus:bg-gray-700
+                          focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent">
+        </div>
+        <div class="flex gap-2">
+            <noscript>
+            <button type="submit"
+                    class="px-4 py-2 text-sm font-bold text-white rounded-xl transition-all"
+                    style="background: linear-gradient(135deg, #00bed4, #4d0094)">
+                Apply
+            </button>
+            </noscript>
+            {% if filter_search or filter_platform or filter_guild %}
+            <a href="/images" data-live-clear
+               class="px-4 py-2 text-sm font-medium rounded-lg transition-colors
+                      text-gray-600 dark:text-gray-300
+                      bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600">
+                Clear
+            </a>
+            {% endif %}
+        </div>
+    </form>
+</div>
+
+<div data-live-content>
+
+<!-- Results info -->
+<div class="flex items-center justify-between mb-3">
+    <p class="text-sm text-gray-500 dark:text-gray-400">
+        Showing <span class="font-medium text-gray-700 dark:text-gray-300">{{ rows | length }}</span>
+        of <span class="font-medium text-gray-700 dark:text-gray-300">{{ total }}</span> results
+        {% if filter_search or filter_platform or filter_guild %}
+        <span class="ml-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium
+                     bg-cyan-50 dark:bg-cyan-900/40 text-cyan-700 dark:text-cyan-300">filtered</span>
+        {% endif %}
+    </p>
+    {% if total_pages > 1 %}
+    <p class="text-sm text-gray-500 dark:text-gray-400">Page {{ page }} of {{ total_pages }}</p>
+    {% endif %}
+</div>
+
+<!-- Table -->
+<div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700/60 overflow-hidden">
+    {% if rows %}
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="border-b border-gray-100 dark:border-gray-700/60">
+                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider w-14">ID</th>
+                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider w-24">Platform</th>
+                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Source URL</th>
+                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider w-36">Guild ID</th>
+                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider w-24">Discord</th>
+                    <th class="text-left px-4 py-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider w-40">Posted At</th>
+                    <th class="text-right px-4 py-3 text-xs font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider w-20"></th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-50 dark:divide-gray-700/40">
+                {% for row in rows %}
+                <tr class="hover:bg-gray-50/70 dark:hover:bg-gray-700/30 transition-colors group">
+
+                    <!-- ID -->
+                    <td class="px-4 py-3">
+                        <span class="font-mono text-xs text-gray-400 dark:text-gray-500">{{ row.id }}</span>
+                    </td>
+
+                    <!-- Platform badge -->
+                    <td class="px-4 py-3">
+                        {% if row.source_platform == 'pixiv' %}
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
+                                     bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300
+                                     ring-1 ring-blue-100 dark:ring-blue-800/50">
+                            Pixiv
+                        </span>
+                        {% elif row.source_platform == 'bluesky' %}
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
+                                     bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300
+                                     ring-1 ring-sky-100 dark:ring-sky-800/50">
+                            Bluesky
+                        </span>
+                        {% else %}
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
+                                     bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300
+                                     ring-1 ring-gray-200 dark:ring-gray-600">
+                            {{ row.source_platform }}
+                        </span>
+                        {% endif %}
+                    </td>
+
+                    <!-- Source URL -->
+                    <td class="px-4 py-3 max-w-xs">
+                        <a href="{{ row.source_url }}" target="_blank" rel="noopener noreferrer"
+                           title="{{ row.source_url }}"
+                           class="font-mono text-xs truncate block max-w-xs
+                                  text-pink-500 dark:text-pink-400
+                                  hover:text-pink-700 dark:hover:text-pink-300 hover:underline">
+                            {{ row.source_url }}
+                        </a>
+                    </td>
+
+                    <!-- Guild ID -->
+                    <td class="px-4 py-3">
+                        <span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ row.guild_id }}</span>
+                    </td>
+
+                    <!-- Discord link -->
+                    <td class="px-4 py-3">
+                        <a href="https://discord.com/channels/{{ row.guild_id }}/{{ row.thread_id }}/{{ row.message_id }}"
+                           target="_blank" rel="noopener noreferrer"
+                           class="inline-flex items-center gap-1 text-xs font-medium transition-colors
+                                  text-indigo-600 dark:text-indigo-400
+                                  hover:text-indigo-800 dark:hover:text-indigo-300">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+                            </svg>
+                            Open
+                        </a>
+                    </td>
+
+                    <!-- Posted at -->
+                    <td class="px-4 py-3">
+                        <span class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">{{ row.posted_at }}</span>
+                    </td>
+
+                    <!-- Delete -->
+                    <td class="px-4 py-3 text-right">
+                        <button onclick="confirmDelete({{ row.id }})"
+                                class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-all
+                                       opacity-0 group-hover:opacity-100
+                                       text-red-500 dark:text-red-400
+                                       hover:text-red-700 dark:hover:text-red-300
+                                       hover:bg-red-50 dark:hover:bg-red-900/30">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                            </svg>
+                            Delete
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="py-20 text-center">
+        <div class="w-14 h-14 rounded-2xl bg-gray-100 dark:bg-gray-700 flex items-center justify-center mx-auto mb-4">
+            <svg class="w-7 h-7 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+            </svg>
+        </div>
+        <p class="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">No images found</p>
+        <p class="text-sm text-gray-400 dark:text-gray-500">
+            {% if filter_search or filter_platform or filter_guild %}
+            No records match your filters.
+            <a href="/images" class="text-cyan-600 dark:text-cyan-400 hover:underline">Clear filters</a>
+            {% else %}
+            The database is empty.
+            {% endif %}
+        </p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+{% set start_page = [1, page - 2] | max %}
+{% set end_page = [total_pages + 1, page + 3] | min %}
+<div class="flex items-center justify-center gap-1.5 mt-6">
+    {% if page > 1 %}
+    <a href="{{ build_page_url(page - 1, filter_platform, filter_guild, filter_search) }}"
+       class="px-3 py-2 text-sm font-medium rounded-lg transition-colors
+              text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800
+              border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700">
+        &larr; Prev
+    </a>
+    {% endif %}
+
+    {% if start_page > 1 %}
+    <a href="{{ build_page_url(1, filter_platform, filter_guild, filter_search) }}"
+       class="px-3 py-2 text-sm font-medium rounded-lg transition-colors
+              text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800
+              border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700">1</a>
+    {% if start_page > 2 %}
+    <span class="px-2 text-gray-400 dark:text-gray-600 text-sm">…</span>
+    {% endif %}
+    {% endif %}
+
+    {% for p in range(start_page, end_page) %}
+    <a href="{{ build_page_url(p, filter_platform, filter_guild, filter_search) }}"
+       class="px-3 py-2 text-sm font-medium rounded-lg transition-colors border
+              {% if p == page %}text-white border-transparent{% else %}text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700{% endif %}"
+       {% if p == page %}style="background: linear-gradient(135deg, #00bed4, #4d0094)"{% endif %}>
+        {{ p }}
+    </a>
+    {% endfor %}
+
+    {% if end_page <= total_pages %}
+    {% if end_page < total_pages %}
+    <span class="px-2 text-gray-400 dark:text-gray-600 text-sm">…</span>
+    {% endif %}
+    <a href="{{ build_page_url(total_pages, filter_platform, filter_guild, filter_search) }}"
+       class="px-3 py-2 text-sm font-medium rounded-lg transition-colors
+              text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800
+              border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700">{{ total_pages }}</a>
+    {% endif %}
+
+    {% if page < total_pages %}
+    <a href="{{ build_page_url(page + 1, filter_platform, filter_guild, filter_search) }}"
+       class="px-3 py-2 text-sm font-medium rounded-lg transition-colors
+              text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800
+              border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700">
+        Next &rarr;
+    </a>
+    {% endif %}
+</div>
+{% endif %}
+
+</div><!-- /data-live-content -->
+
+{% endblock %}

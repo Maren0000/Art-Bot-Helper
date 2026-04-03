@@ -85,6 +85,17 @@ class Database:
         
         return image
 
+    async def delete_image(self, image_id: int) -> bool:
+        """Delete an image record by ID. Returns True if deleted, False if not found."""
+        image = await Image.get_or_none(id=image_id)
+        if image is None:
+            return False
+        phash = image.phash
+        await image.delete()
+        if self._hash_cache is not None:
+            self._hash_cache.pop(phash, None)
+        return True
+
     async def close(self):
         conn = Tortoise.get_connection("default")
         await conn.execute_query("PRAGMA wal_checkpoint(TRUNCATE);")

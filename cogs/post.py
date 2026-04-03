@@ -1,6 +1,5 @@
 from __future__ import annotations
 import io
-import os
 from discord.ext import commands
 import discord
 import datetime
@@ -417,8 +416,8 @@ class PostingCog(commands.Cog):
     async def send_webhook(self, embed, post: discord.Message, channel_name: str, link: str):
         if channel_name in self.bot.config.webhooks:
             embed.set_image(url=post.embeds[0].image.url)
-            for webhook_env in self.bot.config.webhooks[channel_name]:
-                await self.bot.client.post(os.getenv(webhook_env), data ={"payload_json":  json.dumps({"content": f"<{link}>", "embeds": [embed.to_dict()]})})
+            for webhook_url in self.bot.config.webhooks[channel_name]:
+                await self.bot.client.post(webhook_url, data={"payload_json": json.dumps({"content": f"<{link}>", "embeds": [embed.to_dict()]})})
     
     async def check_duplicate(self, image: io.BytesIO, guild_id: int) -> tuple[dict, list]:
         """
