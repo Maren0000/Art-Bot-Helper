@@ -15,6 +15,11 @@ DANBOORU_BASE_URL = "https://danbooru.donmai.us/tags.json"
 DANBOORU_ALIAS_URL = "https://danbooru.donmai.us/tag_aliases.json"
 DANBOORU_WIKI_URL = "https://danbooru.donmai.us/wiki_pages.json"
 
+USER_AGENT = "Art-Bot-Helper/1.0"
+
+SESSION = requests.Session()
+SESSION.headers.update({"User-Agent": USER_AGENT})
+
 FETCH_LIMIT = 1000
 SLEEP_TIME = 0.1
 
@@ -38,7 +43,7 @@ def fetch_all_character_tags():
         }
 
         #LOGGER.info(f"Fetching Danbooru page {page}...")
-        resp = requests.get(DANBOORU_BASE_URL, params=params, timeout=30)
+        resp = SESSION.get(DANBOORU_BASE_URL, params=params, timeout=30)
         resp.raise_for_status()
 
         data = resp.json()
@@ -69,7 +74,7 @@ def fetch_all_tag_aliases():
         }
 
         #LOGGER.info(f"Fetching Danbooru aliases page {page}...")
-        resp = requests.get(DANBOORU_ALIAS_URL, params=params, timeout=30)
+        resp = SESSION.get(DANBOORU_ALIAS_URL, params=params, timeout=30)
         resp.raise_for_status()
 
         data = resp.json()
@@ -99,7 +104,7 @@ def fetch_all_wiki_pages():
         }
 
         #LOGGER.info(f"Fetching Danbooru wiki page {page}...")
-        resp = requests.get(DANBOORU_WIKI_URL, params=params, timeout=30)
+        resp = SESSION.get(DANBOORU_WIKI_URL, params=params, timeout=30)
         resp.raise_for_status()
 
         data = resp.json()
