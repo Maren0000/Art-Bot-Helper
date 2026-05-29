@@ -10,9 +10,154 @@ from base64 import b64encode
 
 from view import AutoPostView
 
+
+def _error_description(error: Exception) -> tuple[str, str | None]:
+    """Return (user-facing description, optional python-error-string) for an error."""
+    if isinstance(error, commands.MissingRequiredArgument):
+        return (
+            "Command format is incorrect! Please format the command as `/post gacha {series} {safety_level} {chara1,chara2} {link}`",
+            str(error),
+        )
+    if isinstance(error, commands.BadArgument):
+        return ("Incorrect argument! Check if the {series} and {safety_level} are correct.", str(error))
+    if isinstance(error, exception.InvalidLink):
+        return (
+            "Invalid link! Please check {link} argument\nSupported Sites:\n"
+            "- Pixiv (<https://www.pixiv.net>)\n- Bluesky (<https://bsky.app>)",
+            None,
+        )
+    if isinstance(error, exception.ForumNotFound):
+        return ("Could not find correct forum channel! Check that {series} and {safety_level} is correct.", None)
+    if isinstance(error, exception.AccessDenied):
+        return ("You do not have access to the channel you are trying to post to!", None)
+    if isinstance(error, exception.ThreadsNotFound):
+        return (
+            "Could not find all character threads!\nMissing threads:\n"
+            + str(error).lstrip("Command raised an exception: str: "),
+            None,
+        )
+    if isinstance(error, exception.NotPoster):
+        return ("You aren't allowed to post art!", None)
+    if isinstance(error, exception.RequestFailed):
+        return ("The bot has failed to contact an external server. Please try again or ping Maren about this issue.", None)
+    if isinstance(error, exception.AIImageFound):
+        return ("The artist has labeled that this image has been AI assisted. As such, it cannot be added to this server.", None)
+    if isinstance(error, exception.CharacterDetectFail):
+        return ("The automatic character detector has failed. Please use resubmit the link with the character list.", None)
+    if isinstance(error, exception.DuplicateImageFound):
+        return (
+            "This image has already been posted to this server!\n"
+            + str(error).lstrip("Command raised an exception: str: "),
+            None,
+        )
+    return ("Unknown error occurred while using the command", str(error))
+
+
+def _build_error_embed(error: Exception, command) -> discord.Embed:
+    description, python_error = _error_description(error)
+    embed = discord.Embed(
+        title=f"Error in command {command}!",
+        description=description,
+        color=discord.Color.red(),
+        timestamp=datetime.datetime.now(),
+    )
+    if python_error is not None:
+        embed.add_field(name="Python error", value=python_error)
+    return embed
+
+
+def _status_embed(step: str, command_name: str) -> discord.Embed:
+    return discord.Embed(
+        title=f"Processing /{command_name}…",
+        description=step,
+        color=discord.Color.blurple(),
+        timestamp=datetime.datetime.now(),
+    )
+
+
+async def _start_status_message(ctx: commands.Context, initial_step: str) -> discord.Message:
+    """Establish a single message we can edit for the whole command lifecycle.
+
+    For slash invocations: overwrites the deferred 'Bot is thinking…' placeholder.
+    For prefix invocations: sends a fresh message we can edit later.
+    """
+    command_name = ctx.command.qualified_name if ctx.command else "command"
+    embed = _status_embed(initial_step, command_name)
+    if ctx.interaction is not None:
+        if ctx.interaction.response.is_done():
+            await ctx.interaction.edit_original_response(embed=embed)
+        else:
+            await ctx.interaction.response.send_message(embed=embed)
+        return await ctx.interaction.original_response()
+    return await ctx.send(embed=embed)
+
+
+def _make_status_updater(message: discord.Message, command_name: str):
+    """Return an async callable(step_text) that edits the status message."""
+    async def update(step: str) -> None:
+        try:
+            await message.edit(embed=_status_embed(step, command_name))
+        except discord.HTTPException:
+            # A status-update glitch should never break the command.
+            pass
+    return update
+
+
+def _build_confirmation_embed(
+    characters: str | None,
+    selected_forum: discord.ForumChannel | None,
+    last_error: Exception | None,
+) -> discord.Embed:
+    if last_error is None:
+        embed = discord.Embed(
+            title="User Confirmation",
+            description="Are you sure you want to confirm the following options?",
+            color=discord.Color.yellow(),
+            timestamp=datetime.datetime.now(),
+        )
+    else:
+        desc, _ = _error_description(last_error)
+        embed = discord.Embed(
+            title="Posting Failed — Adjust and Retry",
+            description=f"**Previous attempt failed:** {desc}\n\nAdjust the fields below and click Retry.",
+            color=discord.Color.orange(),
+            timestamp=datetime.datetime.now(),
+        )
+
+    chara_desc = characters if characters else "Please enter a character name."
+    forum_desc = selected_forum.mention if selected_forum else "Please select a forum channel."
+    embed.add_field(name="Characters", value=chara_desc, inline=False)
+    embed.add_field(name="Forum", value=forum_desc, inline=False)
+    return embed
+
+
 class PostingCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+    async def _send_error(
+        self,
+        ctx: commands.Context,
+        error: Exception,
+        *,
+        status_message: discord.Message | None = None,
+    ) -> None:
+        """Render an error embed in the status/deferred message (or send a fresh message if neither exists)."""
+        self.bot.logger.error("Posting command error", exc_info=error)
+        embed = _build_error_embed(error, ctx.command)
+        if status_message is not None:
+            try:
+                await status_message.edit(embed=embed, view=None, attachments=[])
+                return
+            except discord.HTTPException:
+                pass
+        if ctx.interaction is not None and ctx.interaction.response.is_done():
+            try:
+                await ctx.interaction.edit_original_response(embed=embed, view=None, attachments=[])
+                return
+            except discord.HTTPException:
+                pass
+        await ctx.send(embed=embed)
 
     @commands.hybrid_command(name="autopost")
     async def auto_post(self, ctx: commands.Context, link: str, image_num: int | None = None):
@@ -29,72 +174,89 @@ class PostingCog(commands.Cog):
             Optional argument to select specific image from multiple ones in a post.
         """
         await ctx.defer()
+        message = await _start_status_message(ctx, "🔗 Reading link...")
+        update = _make_status_updater(message, ctx.command.qualified_name)
 
-        post_data, hq_image, image_name, hashes, embed_fallback, platform = await self.fetch_and_validate_image(
-            link, ctx.guild, image_num
-        )
-
-        view = AutoPostView(ctx.author, timeout=300)
-
-        # Run ML model for character/series detection (works for all platforms)
-        charas_model, series, safety = await self.tags_model_pass(hq_image, image_name)
-        view.characters = ",".join(charas_model)
-        
-        # For Pixiv, also check Pixiv tags for additional character/series info
-        if platform == "pixiv":
-            charas_pixiv, series_pixiv = self.tags_pixiv_pass(post_data)
-            view.characters = ",".join(charas_model | charas_pixiv)
-            if series_pixiv:
-                series = series_pixiv
-        
-        # Finding forum channel based on detected series and safety
-        if series != "" and safety != "":
-            for channel in ctx.guild.channels:
-                if channel.name == series + "-" + safety:
-                    view.selected_forum = channel
-                    break
-
-        embed = discord.Embed(
-            title="User Confirmation",
-            description="Are you sure you want to confirm the following options?",
-            color=discord.Color.yellow(),
-            timestamp=datetime.datetime.now()
-        )
-
-        chara_desc = view.characters if view.characters != "" else "Please enter a character name."
-        forum_desc = view.selected_forum.mention if view.selected_forum else "Please select a forum channel."
-        embed.add_field(name="Detected Characters", value=chara_desc, inline=False)
-        embed.add_field(name="Detected Channel", value=forum_desc, inline=False)
-
-        view.message = await ctx.send(embed=embed, view=view)
-        await view.wait()
-
-        if view.confirmed:
-            threads, _, _ = await self.find_character_threads(view.selected_forum, view.characters)
-            img = hq_image.read()
-            thread_links, post_id = await self.create_embed_and_send(
-                link, post_data, threads, ctx, view.selected_forum.name,
-                embed_fallback, img, image_name, hashes, image_num, platform
+        try:
+            post_data, hq_image, image_name, hashes, embed_fallback, platform = await self.fetch_and_validate_image(
+                link, ctx.guild, image_num, on_status=update,
             )
 
-            embed = discord.Embed(
-                title="Successfully posted!",
-                description="Your art has been posted in " + view.selected_forum.jump_url,
-                color=discord.Color.green(),
-                timestamp=datetime.datetime.now()
+            # Run ML model for character/series detection (works for all platforms)
+            charas_model, series, safety = await self.tags_model_pass(hq_image, image_name, on_status=update)
+            characters = ",".join(charas_model)
+
+            # For Pixiv, also check Pixiv tags for additional character/series info
+            if platform == "pixiv":
+                charas_pixiv, series_pixiv = self.tags_pixiv_pass(post_data)
+                characters = ",".join(charas_model | charas_pixiv)
+                if series_pixiv:
+                    series = series_pixiv
+
+            # Finding forum channel based on detected series and safety
+            selected_forum = None
+            if series and safety:
+                for channel in ctx.guild.channels:
+                    if channel.name == f"{series}-{safety}":
+                        selected_forum = channel
+                        break
+        except Exception as e:
+            return await self._send_error(ctx, e, status_message=message)
+
+        last_error: Exception | None = None
+
+        while True:
+            view = AutoPostView(
+                ctx.author,
+                characters=characters,
+                selected_forum=selected_forum,
+                retry=last_error is not None,
+                timeout=300,
             )
-            embed.add_field(name="Threads & Links", value=thread_links)
-            if post_id is not None:
-                embed.set_footer(text=f"Post ID: {post_id} — use /deletepost to remove from database")
-            await view.message.edit(embed=embed)
-        else:
-            embed = discord.Embed(
-                title="Autopost Cancelled",
-                description="The poster has cancelled the post or it has timed out.",
-                color=discord.Color.red(),
-                timestamp=datetime.datetime.now()
-            )
-            await view.message.edit(embed=embed)
+            embed = _build_confirmation_embed(characters, selected_forum, last_error)
+            await message.edit(embed=embed, view=view)
+            view.message = message
+
+            await view.wait()
+            characters = view.characters
+            selected_forum = view.selected_forum
+
+            if not view.confirmed:
+                cancel_embed = discord.Embed(
+                    title="Autopost Cancelled",
+                    description="The poster has cancelled the post or it has timed out.",
+                    color=discord.Color.red(),
+                    timestamp=datetime.datetime.now(),
+                )
+                await message.edit(embed=cancel_embed, view=None)
+                return
+
+            try:
+                threads, _, _ = await self.find_character_threads(selected_forum, characters, on_status=update)
+                hq_image.seek(0)
+                img = hq_image.read()
+                thread_links, post_id = await self.create_embed_and_send(
+                    link, post_data, threads, ctx, selected_forum.name,
+                    embed_fallback, img, image_name, hashes, image_num, platform,
+                    on_status=update,
+                )
+
+                success_embed = discord.Embed(
+                    title="Successfully posted!",
+                    description=f"Your art has been posted in {selected_forum.jump_url}",
+                    color=discord.Color.green(),
+                    timestamp=datetime.datetime.now(),
+                )
+                success_embed.add_field(name="Threads & Links", value=thread_links)
+                if post_id is not None:
+                    success_embed.set_footer(text=f"Post ID: {post_id} — use /deletepost to remove from database")
+                await message.edit(embed=success_embed, view=None)
+                return
+            except Exception as e:
+                self.bot.logger.error("Posting command error", exc_info=e)
+                last_error = e
+                # Loop continues: the next iteration rebuilds the embed with the
+                # error notice and re-enables the view with a Retry button.
 
     @commands.hybrid_command(name="post")
     async def post(self, ctx: commands.Context, forum_channel: discord.channel.ForumChannel, characters: str, link: str, image_num: int | None = None):
@@ -115,18 +277,24 @@ class PostingCog(commands.Cog):
             Optional argument to select specific image from multiple ones in a post.
         """
         await ctx.defer()
+        message = await _start_status_message(ctx, "🔗 Reading link...")
+        update = _make_status_updater(message, ctx.command.qualified_name)
 
-        post_data, hq_image, image_name, hashes, embed_fallback, platform = await self.fetch_and_validate_image(
-            link, ctx.guild, image_num
-        )
+        try:
+            post_data, hq_image, image_name, hashes, embed_fallback, platform = await self.fetch_and_validate_image(
+                link, ctx.guild, image_num, on_status=update,
+            )
 
-        threads, _, _ = await self.find_character_threads(forum_channel, characters.strip())
+            threads, _, _ = await self.find_character_threads(forum_channel, characters.strip(), on_status=update)
 
-        img = hq_image.read()
-        thread_links, post_id = await self.create_embed_and_send(
-            link, post_data, threads, ctx, forum_channel.name,
-            embed_fallback, img, image_name, hashes, image_num, platform
-        )
+            img = hq_image.read()
+            thread_links, post_id = await self.create_embed_and_send(
+                link, post_data, threads, ctx, forum_channel.name,
+                embed_fallback, img, image_name, hashes, image_num, platform,
+                on_status=update,
+            )
+        except Exception as e:
+            return await self._send_error(ctx, e, status_message=message)
 
         embed = discord.Embed(
             title="Successfully posted!",
@@ -137,46 +305,12 @@ class PostingCog(commands.Cog):
         embed.add_field(name="Threads & Links", value=thread_links)
         if post_id is not None:
             embed.set_footer(text=f"Post ID: {post_id} — use /deletepost to remove from database")
-        await ctx.send(embed=embed)
-        
+        await message.edit(embed=embed)
+
     @post.error
     @auto_post.error
     async def posting_error(self, ctx: commands.Context, error: commands.CommandError):
-        embed = discord.Embed(
-        title=f"Error in command {ctx.command}!",
-        description="Unknown error occurred while using the command",
-        color=discord.Color.red(),
-        timestamp=datetime.datetime.now()
-        )
-        self.bot.logger.error("Posting command error", exc_info=error)
-        if isinstance(error, commands.MissingRequiredArgument):
-            embed.description = "Command format is incorrect! Please format the command as `/post gacha {series} {safety_level} {chara1,chara2} {link}`"
-            embed.add_field(name="Python error", value=str(error))
-        elif isinstance(error, commands.BadArgument):
-            embed.description = "Incorrect argument! Check if the {series} and {safety_level} are correct."
-            embed.add_field(name="Python error", value=str(error))
-        elif isinstance(error, exception.InvalidLink):
-            embed.description = "Invalid link! Please check {link} argument\nSupported Sites:\n\
-                           - Pixiv (<https://www.pixiv.net>)\n- Bluesky (<https://bsky.app>)"
-        elif isinstance(error, exception.ForumNotFound):
-            embed.description = "Could not find correct forum channel! Check that {series} and {safety_level} is correct."
-        elif isinstance(error, exception.AccessDenied):
-            embed.description = "You do not have access to the channel you are trying to post to!"
-        elif isinstance(error, exception.ThreadsNotFound):
-            embed.description = "Could not find all character threads!\nMissing threads:\n" + str(error).lstrip("Command raised an exception: str: ")
-        elif isinstance(error, exception.NotPoster):
-            embed.description = "You aren't allowed to post art!"
-        elif isinstance(error, exception.RequestFailed):
-            embed.description = "The bot has failed to contact an external server. Please try again or ping Maren about this issue."
-        elif isinstance(error, exception.AIImageFound):
-            embed.description = "The artist has labeled that this image has been AI assisted. As such, it cannot be added to this server."
-        elif isinstance(error, exception.CharacterDetectFail):
-            embed.description = "The automatic character detector has failed. Please use resubmit the link with the character list."
-        elif isinstance(error, exception.DuplicateImageFound):
-            embed.description = "This image has already been posted to this server!\n" + str(error).lstrip("Command raised an exception: str: ")
-        else:
-            embed.add_field(name="Python error", value=str(error))
-        await ctx.send(embed=embed)
+        await self._send_error(ctx, error)
         
     @commands.hybrid_command(name="help")
     async def help(self, ctx: commands.Context):
@@ -249,14 +383,15 @@ class PostingCog(commands.Cog):
             embed.add_field(name="Python error", value=str(error))
         await ctx.send(embed=embed)
 
-    async def tags_model_pass(self, hq_image: io.BytesIO, image_name: str) -> tuple[set, str, str]:
+    async def tags_model_pass(self, hq_image: io.BytesIO, image_name: str, on_status=None) -> tuple[set, str, str]:
         """
         Run ML model on image to detect characters, series, and safety rating.
-        
+
         Args:
             hq_image: BytesIO of the high-quality image
             image_name: Filename to determine image format
-            
+            on_status: optional async callable(text) for progress updates
+
         Returns:
             tuple: (characters_set, series_str, safety_str)
         """
@@ -264,7 +399,7 @@ class PostingCog(commands.Cog):
         hq_image.seek(0)
         image = hq_image.read()
         hq_image.seek(0)  # Reset for later use
-        
+
         # Determine format from filename
         if ".png" in image_name.lower():
             mime = "image/png"
@@ -274,7 +409,7 @@ class PostingCog(commands.Cog):
             mime = "image/gif"
         else:
             mime = "image/jpeg"
-        
+
         gradioIn = f"data:{mime};base64,{b64encode(image).decode('utf-8')}"
 
         image_input = {
@@ -282,6 +417,8 @@ class PostingCog(commands.Cog):
             "is_stream": False
         }
 
+        if on_status:
+            await on_status("🤖 Running character & series detection model...")
         result = self.bot.gradio_client.predict(
         image_path=image_input,
         artist_threshold=0.5,
@@ -335,7 +472,7 @@ class PostingCog(commands.Cog):
             message_id=message_id,
         )
 
-    async def create_embed_and_send(self, link: str, post_data: dict, threads: list, context: commands.Context, channel_name, embed_fallback: bool, hq_image: bytes, image_name: str, hashes: dict, image_num: int | None = None, platform: str = "pixiv") -> str:
+    async def create_embed_and_send(self, link: str, post_data: dict, threads: list, context: commands.Context, channel_name, embed_fallback: bool, hq_image: bytes, image_name: str, hashes: dict, image_num: int | None = None, platform: str = "pixiv", on_status=None) -> str:
         msg = ""
         
         # Build embed based on platform
@@ -376,16 +513,19 @@ class PostingCog(commands.Cog):
                 embed = "Poster: "+ context.author.name + "\n" + fallback_link
 
         first_post = None
-        for thread in threads:
+        total = len(threads)
+        for idx, thread in enumerate(threads, start=1):
+            if on_status:
+                await on_status(f"📤 Posting to thread {idx} of {total}: #{thread.name}")
             if not embed_fallback:
                 post = await thread.send(content=f"<{link}>",embed=embed, file=discord.File(io.BytesIO(hq_image),filename=image_name))
             else:
                 post = await thread.send(content=embed)
-            
+
             # Store first post for hash tracking
             if first_post is None:
                 first_post = post
-            
+
             if thread == threads[len(threads)-1]:
                 msg += "- " + post.jump_url
             else:
@@ -394,6 +534,8 @@ class PostingCog(commands.Cog):
         # Store image hash in database after successful posting
         post_id = None
         if first_post is not None:
+            if on_status:
+                await on_status("💾 Recording post in database...")
             image = await self.store_image_hash(
                 hashes=hashes,
                 link=link,
@@ -455,32 +597,35 @@ class PostingCog(commands.Cog):
         
         return hash_strings, duplicates
 
-    async def fetch_and_validate_image(self, link: str, guild: discord.Guild, image_num: int | None = None) -> tuple[dict, io.BytesIO, str, dict, bool, str]:
+    async def fetch_and_validate_image(self, link: str, guild: discord.Guild, image_num: int | None = None, on_status=None) -> tuple[dict, io.BytesIO, str, dict, bool, str]:
         """
         Validate link, fetch image from supported platform, check for duplicates, and determine fallback mode.
-        
+
         Returns:
             tuple: (post_data, hq_image, image_name, hashes, embed_fallback, platform)
-        
+
         Raises:
             InvalidLink: If link is not from a supported platform
             DuplicateImageFound: If image was already posted to this guild
         """
         platform = detect_platform(link)
         embed_fallback = False
-        
+
         if platform == "pixiv":
-            post_data, hq_image, image_name = await pixiv_ajax_get(self.bot, link, image_num)
+            post_data, hq_image, image_name = await pixiv_ajax_get(self.bot, link, image_num, on_status=on_status)
         elif platform == "bluesky":
             post_data, hq_image, image_name = await bluesky_get(
                 self.bot,
-                link, 
+                link,
                 image_num,
+                on_status=on_status,
             )
         else:
             raise exception.InvalidLink("Invalid Link! Supported platforms: Pixiv, Bluesky")
 
         # Check for duplicates before proceeding
+        if on_status:
+            await on_status("🔍 Hashing image & checking for duplicates...")
         hashes, duplicates = await self.check_duplicate(hq_image, guild.id)
         if duplicates:
             dup = duplicates[0]
@@ -495,10 +640,10 @@ class PostingCog(commands.Cog):
 
         return post_data, hq_image, image_name, hashes, embed_fallback, platform
 
-    async def find_character_threads(self, forum_channel: discord.ForumChannel, characters: str) -> tuple[list, list, list]:
+    async def find_character_threads(self, forum_channel: discord.ForumChannel, characters: str, on_status=None) -> tuple[list, list, list]:
         """
         Find all character threads, group threads, and "All Characters" thread in forum.
-        
+
         Args:
             forum_channel: The forum channel to search
             characters: Comma-separated character names
@@ -511,11 +656,11 @@ class PostingCog(commands.Cog):
         """
         charas = characters.lower().replace("_", " ").split(",")
         charas = [chara.strip() for chara in charas]
-        
+
         threads = []
         thread_names = []
         group_names = []
-        
+
         # Helper to process a thread
         def process_thread(thread):
             if thread.name == "All Characters" and "All Characters" not in thread_names:
@@ -525,19 +670,24 @@ class PostingCog(commands.Cog):
             if thread.name.lower() in charas and thread.name.lower() not in thread_names:
                 threads.append(thread)
                 thread_names.append(thread.name.lower())
-                if (len(thread.applied_tags) != 0 and 
-                    thread.applied_tags[0].name != "Indie" and 
+                if (len(thread.applied_tags) != 0 and
+                    thread.applied_tags[0].name != "Indie" and
                     thread.applied_tags[0].name.lower() + " (group)" not in group_names):
                     group_names.append(thread.applied_tags[0].name.lower() + " (group)")
-        
+
+        if on_status:
+            await on_status(f"🔎 Searching {forum_channel.name} for character threads...")
+
         # Search active threads
         for thread in forum_channel.threads:
             process_thread(thread)
             if len(threads) == len(charas) + 1:
                 break
-        
+
         # Search archived threads if needed
         if len(threads) != len(charas) + 1:
+            if on_status:
+                await on_status(f"📂 Searching archived threads in {forum_channel.name}...")
             async for thread in forum_channel.archived_threads():
                 process_thread(thread)
                 if len(threads) == len(charas) + 1:

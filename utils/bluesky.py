@@ -21,6 +21,7 @@ async def bluesky_get(
     bot,
     link: str,
     image_num: int | None = None,
+    on_status=None,
 ) -> tuple[dict, io.BytesIO, str]:
     """
     Fetch image from a Bluesky post using the official atproto SDK.
@@ -29,10 +30,15 @@ async def bluesky_get(
         bot: The ArtBot instance with client and bsky_client attributes
         link: Bluesky post URL
         image_num: 1-indexed image number (default: 1)
+        on_status: optional async callable(text) for progress updates
 
     Returns:
         tuple: (post_data, image_bytes, image_filename)
     """
+    async def _status(text):
+        if on_status:
+            await on_status(text)
+
     if not bot.bsky_client:
         raise exception.RequestFailed(
             "Bluesky client not initialized. Set BLUESKY_IDENTIFIER and BLUESKY_APP_PASSWORD."
@@ -43,9 +49,11 @@ async def bluesky_get(
     if handle.startswith("did:"):
         did = handle
     else:
+        await _status("🪪 Resolving Bluesky handle...")
         resolved = await bot.bsky_client.resolve_handle(handle)
         did = resolved.did
 
+    await _status("📥 Fetching Bluesky post metadata...")
     uri = f"at://{did}/app.bsky.feed.post/{rkey}"
     response = await bot.bsky_client.get_posts([uri])
 
@@ -81,6 +89,7 @@ async def bluesky_get(
     if not image_url:
         raise exception.RequestFailed("Could not get image URL from Bluesky post")
 
+    await _status("🖼️ Downloading image from Bluesky...")
     img_resp = await bot.client.get(image_url)
     if img_resp.status != 200:
         raise exception.RequestFailed("Failed to download Bluesky image")

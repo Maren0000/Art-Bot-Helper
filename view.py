@@ -68,12 +68,27 @@ class BaseView(discord.ui.View):
         await self._edit(view=self)
 
 class AutoPostView(BaseView):
-    def __init__(self, user: discord.User | discord.Member, timeout: float = 60.0):
+    def __init__(
+        self,
+        user: discord.User | discord.Member,
+        *,
+        characters: str | None = None,
+        selected_forum: discord.ForumChannel | None = None,
+        retry: bool = False,
+        timeout: float = 60.0,
+    ):
         super().__init__(user=user, timeout=timeout)
-        
+
         self.confirmed: bool | None = None
-        self.characters: str | None = None
-        self.selected_forum: discord.ForumChannel | None = None
+        self.characters: str | None = characters
+        self.selected_forum: discord.ForumChannel | None = selected_forum
+
+        if retry:
+            for child in self.children:
+                if isinstance(child, discord.ui.Button) and child.custom_id == "yes":
+                    child.label = "Retry"
+                    child.emoji = "🔄"
+                    child.style = discord.ButtonStyle.primary
 
     async def _turn_off_view(self, interaction: discord.Interaction, *, confirmed: bool):
         self.confirmed = confirmed
@@ -82,7 +97,7 @@ class AutoPostView(BaseView):
         self.stop()
 
     async def _confirm_check(self, interaction: discord.Interaction):
-        if self.characters == "":
+        if not self.characters:
             await interaction.response.send_message(
                 "Please fill out the characters. Use commas as a delimiter for multiple characters.", ephemeral=True
             )

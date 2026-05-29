@@ -5,6 +5,7 @@ import os
 import traceback
 import typing
 import aiohttp
+import httpx
 import uvicorn
 from gradio_client import Client as GraioClient
 from atproto import AsyncClient as BskyClient
@@ -56,7 +57,11 @@ class ArtBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         self.client = aiohttp.ClientSession(cookies={'PHPSESSID': os.getenv("PIXIV_COOKIE")},headers={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0", "Referer": "https://www.pixiv.net/"})
-        self.gradio_client = GraioClient("Halfabumcake/camie-test")
+        # Default httpx write timeout (5s) trips on large base64 image uploads.
+        self.gradio_client = GraioClient(
+            "Halfabumcake/camie-test",
+            httpx_kwargs={"timeout": httpx.Timeout(60.0, connect=10.0)},
+        )
         self.config = Config(os.getenv("CONFIG_PATH"))
         self.db = Database(os.getenv("SQLITE_PATH"))
         

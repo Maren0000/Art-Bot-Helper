@@ -50,7 +50,7 @@ async def ugoria_merge(bot, id) -> tuple[bytes, str]:
         raise exception.RequestFailed("request to pixiv ugoria api failed")
 
 
-async def pixiv_ajax_get(bot, link: str, image_num: int | None) -> tuple[dict, io.BytesIO, str]:
+async def pixiv_ajax_get(bot, link: str, image_num: int | None, on_status=None) -> tuple[dict, io.BytesIO, str]:
     """
     Fetch image from a Pixiv post.
 
@@ -58,11 +58,17 @@ async def pixiv_ajax_get(bot, link: str, image_num: int | None) -> tuple[dict, i
         bot: The ArtBot instance with client attribute
         link: Pixiv post URL
         image_num: 1-indexed image number (default: 1)
+        on_status: optional async callable(text) for progress updates
 
     Returns:
         tuple: (ajax_resp, image_bytes, image_filename)
     """
+    async def _status(text):
+        if on_status:
+            await on_status(text)
+
     id = link.split("/")[-1].split("?", 1)[0].split("#", 1)[0]
+    await _status("📥 Fetching Pixiv post metadata...")
     resp = await bot.client.get(f"https://www.pixiv.net/ajax/illust/{id}")
     if resp.status == 200:
         ajax_resp = json.loads(await resp.text())
@@ -75,11 +81,13 @@ async def pixiv_ajax_get(bot, link: str, image_num: int | None) -> tuple[dict, i
             if image_num:
                 image_link = image_link.replace("_p0.", f"_p{image_num-1}.")
                 image_name = image_name.replace("_p0.", f"_p{image_num-1}.")
+            await _status("🖼️ Downloading image from Pixiv...")
             image_req = await bot.client.get(image_link)
             if image_req.status == 200:
                 image = await image_req.read()
             else:
                 raise exception.RequestFailed("request to pixiv image failed")
         else:
+            await _status("🎞️ Compositing ugoira frames...")
             image, image_name = await ugoria_merge(bot, id)
     return ajax_resp, io.BytesIO(image), image_name
