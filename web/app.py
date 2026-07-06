@@ -91,6 +91,13 @@ CONFIGS: dict[str, dict] = {
         "description": "Manual tag → display name overrides, applied before Danbooru lookup.",
         "auto_generated": False,
     },
+    "api_settings": {
+        "file": "api_settings.json",
+        "type": "dict",
+        "label": "API Settings",
+        "description": "Userscript API: poster role ID (snowflake) required to use /token, and token expiry in days (0 = never expires).",
+        "auto_generated": False,
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -126,6 +133,12 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Art Bot Admin", lifespan=lifespan)
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
+
+# Userscript API — bearer-token auth, NOT behind the admin session cookie.
+from web.api import ApiError, api_error_handler, router as api_router  # noqa: E402
+
+app.include_router(api_router)
+app.add_exception_handler(ApiError, api_error_handler)
 
 
 def build_page_url(page: int, platform: str, guild_id: str, search: str) -> str:

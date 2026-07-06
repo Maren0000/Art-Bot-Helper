@@ -12,6 +12,22 @@ class Config:
         self.target_series = self.load_set((self.base_path / "target_series.json"))
         self.skip_tags = self.load_set((self.base_path / "skip_tags.json"))
         self.manual_overrides = self.load_dict((self.base_path / "manual_overrides.json"))
+        self.api_settings = self.load_dict((self.base_path / "api_settings.json"))
+
+    @property
+    def poster_role_id(self) -> int | None:
+        try:
+            return int(self.api_settings.get("poster_role_id", "")) or None
+        except (TypeError, ValueError):
+            return None
+
+    @property
+    def token_expiry_days(self) -> int | None:
+        """Days before userscript API tokens expire; None/0 means never."""
+        try:
+            return int(self.api_settings.get("token_expiry_days", "0")) or None
+        except (TypeError, ValueError):
+            return None
 
     def load_json(self, path: Path):
         if path.is_file():
@@ -35,6 +51,7 @@ class Config:
         self.target_series = self.load_set(self.base_path / "target_series.json")
         self.skip_tags = self.load_set(self.base_path / "skip_tags.json")
         self.manual_overrides = self.load_dict(self.base_path / "manual_overrides.json")
+        self.api_settings = self.load_dict(self.base_path / "api_settings.json")
 
     def load_set(self, path: Path) -> set[str]:
         data = self.load_json(path)

@@ -127,6 +127,9 @@ async def run_combined() -> None:
         # Share the bot's Config with the web app so edits reload immediately.
         from web.app import set_bot_config
         set_bot_config(bot.config)
+        # Give the userscript API access to the bot (guilds, db, ML client).
+        from web.api import set_bot
+        set_bot(bot)
         await asyncio.gather(
             bot.connect(),
             web_server.serve(),
