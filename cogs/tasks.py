@@ -9,7 +9,7 @@ from utils.tag_extract import run_update
 
 
 class Tasks(commands.Cog):
-    """Periodically pings the Gradio server to prevent it from sleeping."""
+    """Periodically pings the tagger spaces to prevent them from sleeping."""
 
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
@@ -23,34 +23,31 @@ class Tasks(commands.Cog):
 
     @tasks.loop(hours=23)
     async def gradio_keepalive(self) -> None:
-        """Send a tiny image to the Gradio model to keep the space awake."""
+        """Ping both tagger spaces with a tiny image so HF doesn't sleep them."""
         await self._send_task_update("Gradio keepalive task started.")
-        try:
-            # 1x1 red PNG (smallest valid PNG possible)
-            pixel = self._create_1x1_png()
-            gradio_in = f"data:image/png;base64,{b64encode(pixel).decode('utf-8')}"
+        pixel = self._create_1x1_png()
+        gradio_in = f"data:image/png;base64,{b64encode(pixel).decode('utf-8')}"
 
-            image_input = {
-                "url": gradio_in,
-                "is_stream": False,
-            }
+        image_input = {
+            "url": gradio_in,
+            "is_stream": False,
+        }
 
-            self.bot.gradio_client.predict(
-                image_path=image_input,
-                artist_threshold=0.5,
-                character_threshold=0.85,
-                copyright_threshold=0.5,
-                general_threshold=0.5,
-                meta_threshold=0.5,
-                rating_threshold=0.5,
-                year_threshold=0.5,
-                api_name="/_wrap_predict",
-            )
-            self.logger.info("Gradio keepalive ping sent successfully.")
-            await self._send_task_update("Gradio keepalive task finished successfully.")
-        except Exception as e:
-            self.logger.error(f"Gradio keepalive ping failed: {e}")
-            await self._send_task_update(f"Gradio keepalive task failed: {e}")
+        statuses = []
+        pinged: set[str] = set()
+        for instance in ("gpu", "cpu"):
+            space = self.bot.config.tagger_settings.get(f"{instance}_space", "").strip()
+            if space in pinged:
+                continue
+            pinged.add(space)
+            try:
+                await self.bot.tagger.predict(image_input, instance=instance)
+                statuses.append(f"{instance} ({space}): ok")
+                self.logger.info(f"Gradio keepalive ping sent to {instance} space.")
+            except Exception as e:
+                statuses.append(f"{instance} ({space}): FAILED - {e}")
+                self.logger.error(f"Gradio keepalive ping to {instance} space failed: {e}")
+        await self._send_task_update("Gradio keepalive task finished. " + "; ".join(statuses))
 
     @gradio_keepalive.before_loop
     async def before_gradio_keepalive(self) -> None:

@@ -3,7 +3,7 @@ import datetime
 import discord
 from discord.ext import commands
 
-from utils.api_token import mint_token
+from utils.api_token import SETUP_TOKEN_TTL, mint_setup_token
 
 
 class TokenCog(commands.Cog):
@@ -43,22 +43,24 @@ class TokenCog(commands.Cog):
             return
 
         expiry_days = self.bot.config.token_expiry_days
-        token = mint_token(ctx.author.id, ctx.guild.id, expiry_days)
+        token = mint_setup_token(ctx.author.id, ctx.guild.id)
+        setup_deadline = datetime.datetime.now() + datetime.timedelta(seconds=SETUP_TOKEN_TTL)
 
         if expiry_days:
             expires = datetime.datetime.now() + datetime.timedelta(days=expiry_days)
-            expiry_text = f"Expires <t:{int(expires.timestamp())}:D> — rerun /token to get a new one."
+            expiry_text = f"Once linked, the link expires <t:{int(expires.timestamp())}:D> — rerun /token to re-link."
         else:
-            expiry_text = "Never expires."
+            expiry_text = "Once linked, the userscript stays linked — no need to rerun /token."
 
         dm_embed = discord.Embed(
-            title="Your Art Bot userscript token",
+            title="Your Art Bot setup token",
             description=(
                 f"```\n{token}\n```\n"
+                f"This setup token is **single-use** and expires <t:{int(setup_deadline.timestamp())}:R>.\n"
                 f"{expiry_text}\n\n"
                 "**Setup:** open the Art Bot panel on Twitter/X or Pixiv, open its settings (⚙), "
-                "and paste this token into the *Token* field.\n\n"
-                "Keep this token private — anyone who has it can post as you."
+                "paste this token into the *Setup token* field, and hit **Link account**.\n\n"
+                "Keep this token private — anyone who uses it can post as you."
             ),
             color=discord.Color.blurple(),
             timestamp=datetime.datetime.now(),

@@ -131,6 +131,22 @@
                 </svg>
                 Maps &amp; Config
             </a>
+            <a href="/tagger"
+               class="flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-medium transition-all
+                      {% if active_page == 'tagger' %}
+                      text-white shadow-md
+                      {% else %}
+                      text-gray-400 hover:text-white hover:bg-white/5
+                      {% endif %}"
+               {% if active_page == 'tagger' %}
+               style="background: linear-gradient(90deg, rgba(0,190,212,0.70) 0%, rgba(77,0,148,0.85) 100%); box-shadow: 0 2px 10px rgba(0,190,212,0.20)"
+               {% endif %}>
+                <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                </svg>
+                ML Tagger
+            </a>
         </nav>
 
         <!-- DB path + bottom sparkle -->

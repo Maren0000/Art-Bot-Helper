@@ -6,9 +6,7 @@ so the pipeline can run outside a Discord command invocation.
 """
 from __future__ import annotations
 
-import asyncio
 import datetime
-import functools
 import io
 import json
 import re
@@ -19,10 +17,6 @@ from base64 import b64encode
 
 import exception
 from utils import bluesky_get, compute_hashes, detect_platform, imagehash, pixiv_ajax_get
-
-# The gradio client is not safe for concurrent predicts; this also keeps the
-# combined cog + API load on the ML space serial.
-_ML_LOCK = asyncio.Lock()
 
 
 def error_description(error: Exception) -> tuple[str, str | None]:
@@ -129,37 +123,22 @@ async def tags_model_pass(bot, hq_image: io.BytesIO, image_name: str, on_status=
     if on_status:
         await on_status("🤖 Running character & series detection model...")
 
-    # predict() blocks on network I/O — run it in a thread so the bot's event
-    # loop (Discord heartbeats, web server) keeps running.
-    predict = functools.partial(
-        bot.gradio_client.predict,
-        image_path=image_input,
-        artist_threshold=0.5,
-        character_threshold=0.85,
-        copyright_threshold=0.5,
-        general_threshold=0.5,
-        meta_threshold=0.5,
-        rating_threshold=0.5,
-        year_threshold=0.5,
-        api_name="/_wrap_predict",
-    )
-    async with _ML_LOCK:
-        result = await asyncio.get_running_loop().run_in_executor(None, predict)
+    result = await bot.tagger.predict(image_input)
 
     charas = set()
-    for chara in result[1]:
+    for chara in result.characters:
         if chara in bot.config.char_map:
             charas.add(bot.config.char_map[chara])
 
     series = ""
-    for series_can in result[2]:
+    for series_can in result.copyrights:
         if series_can in bot.config.series_map:
             series = bot.config.series_map[series_can]
             break
 
     safety = ""
-    if len(result[5]) != 0:
-        safety = bot.config.safety_map[next(iter(result[5]))]
+    if result.rating is not None:
+        safety = bot.config.safety_map.get(result.rating, "")
 
     return charas, series, safety
 

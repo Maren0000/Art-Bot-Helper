@@ -23,7 +23,15 @@ from fastapi.responses import JSONResponse
 
 import exception
 from services import posting
-from utils.api_token import InvalidToken, verify_token
+from utils.api_token import (
+    ACCESS_TOKEN_TTL,
+    SETUP_TOKEN_TTL,
+    InvalidToken,
+    TokenExpired,
+    mint_access_token,
+    mint_refresh_token,
+    verify_token,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -37,6 +45,10 @@ _bot = None
 def set_bot(bot) -> None:
     global _bot
     _bot = bot
+
+
+def get_bot():
+    return _bot
 
 
 # ---------------------------------------------------------------------------
@@ -80,20 +92,16 @@ class Poster:
     user_id: int
     guild: discord.Guild
     name: str
+    member: discord.Member
 
 
-async def require_poster(authorization: str = Header(default="")) -> Poster:
+def _require_bot() -> None:
     if _bot is None or not _bot.is_ready():
         raise ApiError(503, "api_unavailable", "The bot is not running.")
 
-    scheme, _, token = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not token:
-        raise ApiError(401, "invalid_token", "Missing bearer token.")
-    try:
-        claims = verify_token(token)
-    except InvalidToken as err:
-        raise ApiError(401, "invalid_token", str(err))
 
+async def _resolve_poster(claims) -> Poster:
+    """Live guild-membership + poster-role check shared by every auth path."""
     guild = _bot.get_guild(claims.guild_id)
     if guild is None:
         raise ApiError(403, "unknown_guild", "The bot is no longer in that server.")
@@ -111,11 +119,102 @@ async def require_poster(authorization: str = Header(default="")) -> Poster:
     if role_id not in [role.id for role in member.roles]:
         raise ApiError(403, "not_poster", "You aren't allowed to post art! (Missing the poster role.)")
 
-    return Poster(user_id=claims.user_id, guild=guild, name=member.display_name)
+    return Poster(user_id=claims.user_id, guild=guild, name=member.display_name, member=member)
+
+
+async def require_poster(authorization: str = Header(default="")) -> Poster:
+    _require_bot()
+
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise ApiError(401, "invalid_token", "Missing bearer token.")
+    try:
+        claims = verify_token(token, expected_type="access")
+    except TokenExpired:
+        # Distinct code so the userscript knows to refresh + retry, not re-link.
+        raise ApiError(401, "token_expired", "Access token expired — refresh it.")
+    except InvalidToken as err:
+        raise ApiError(401, "invalid_token", str(err))
+
+    return await _resolve_poster(claims)
 
 
 async def _poster(request: Request) -> Poster:
     return await require_poster(request.headers.get("authorization", ""))
+
+
+async def _json_body(request: Request) -> dict:
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        raise ApiError(400, "bad_request", "Body is not valid JSON.")
+    if not isinstance(body, dict):
+        raise ApiError(400, "bad_request", "Body must be a JSON object.")
+    return body
+
+
+# Spent setup-token ids (jti -> token expiry). Setup tokens live 5 minutes, so
+# this stays tiny; in-memory is fine — after a restart old setup tokens can be
+# replayed only within their remaining TTL.
+USED_SETUP_JTIS: dict[str, float] = {}
+
+
+def _verify_auth_token(token: str, expected_type: str, expired_code: str, expired_message: str):
+    try:
+        return verify_token(token, expected_type=expected_type)
+    except TokenExpired:
+        raise ApiError(401, expired_code, expired_message)
+    except InvalidToken as err:
+        raise ApiError(401, "invalid_token", str(err))
+
+
+@router.post("/auth/exchange")
+async def api_auth_exchange(request: Request):
+    """Trade a single-use /token setup token for a refresh + access token pair."""
+    _require_bot()
+    body = await _json_body(request)
+    claims = _verify_auth_token(
+        str(body.get("setup_token") or ""), "setup",
+        "setup_expired", "Setup token expired — run /token in Discord for a fresh one.",
+    )
+
+    now = time.time()
+    for jti in [j for j, exp in USED_SETUP_JTIS.items() if exp < now]:
+        del USED_SETUP_JTIS[jti]
+    if claims.jti is None or claims.jti in USED_SETUP_JTIS:
+        raise ApiError(401, "setup_used", "That setup token was already used — run /token again.")
+
+    poster = await _resolve_poster(claims)
+    # Only burn the jti once the role check passed, so a user who gets the
+    # poster role seconds later can retry with the same DM'd token.
+    USED_SETUP_JTIS[claims.jti] = claims.expires_at or now + SETUP_TOKEN_TTL
+
+    return {
+        "refresh_token": mint_refresh_token(claims.user_id, claims.guild_id, _bot.config.token_expiry_days),
+        "access_token": mint_access_token(claims.user_id, claims.guild_id),
+        "access_expires_in": ACCESS_TOKEN_TTL,
+        "guild_name": poster.guild.name,
+        "user_name": poster.name,
+    }
+
+
+@router.post("/auth/refresh")
+async def api_auth_refresh(request: Request):
+    """Mint a fresh access token from a stored refresh token."""
+    _require_bot()
+    body = await _json_body(request)
+    claims = _verify_auth_token(
+        str(body.get("refresh_token") or ""), "refresh",
+        "refresh_expired", "Your link expired — run /token in Discord and re-link.",
+    )
+
+    poster = await _resolve_poster(claims)
+    return {
+        "access_token": mint_access_token(claims.user_id, claims.guild_id),
+        "access_expires_in": ACCESS_TOKEN_TTL,
+        "guild_name": poster.guild.name,
+        "user_name": poster.name,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -181,11 +280,14 @@ def _submission_response(sub: Submission) -> dict:
 async def api_meta(request: Request):
     poster = await _poster(request)
     safety_levels = sorted(set(_bot.config.safety_map.values()))
+    # Only list forums the member can actually see — the userscript dropdown
+    # must not leak channels hidden from them.
     forums = [
         {"id": str(channel.id), "name": channel.name}
         for channel in poster.guild.channels
         if isinstance(channel, discord.ForumChannel)
         and any(channel.name.endswith(f"-{safety}") for safety in safety_levels)
+        and channel.permissions_for(poster.member).view_channel
     ]
     forums.sort(key=lambda f: f["name"])
     return {
@@ -290,6 +392,8 @@ async def api_submit(request: Request):
         _raise_from_pipeline(err)
 
     forum = posting.find_forum_by_name(poster.guild, series, safety)
+    if forum is not None and not forum.permissions_for(poster.member).view_channel:
+        forum = None  # never suggest a forum the member can't see
 
     sub = Submission(
         id=secrets.token_urlsafe(16),
@@ -323,10 +427,7 @@ async def api_confirm(sid: str, request: Request):
     _sweep()
     sub = _get_submission(sid, poster)
 
-    try:
-        body = await request.json()
-    except json.JSONDecodeError:
-        raise ApiError(400, "bad_request", "Body is not valid JSON.")
+    body = await _json_body(request)
 
     characters = (body.get("characters") or "").strip()
     if not characters:
@@ -336,7 +437,9 @@ async def api_confirm(sid: str, request: Request):
     except (TypeError, ValueError):
         raise ApiError(400, "forum_not_found", "Missing or invalid 'forum_id'.")
     forum = poster.guild.get_channel(forum_id)
-    if not isinstance(forum, discord.ForumChannel):
+    # Same error for "doesn't exist" and "hidden from you" so hidden channel
+    # ids can't be probed.
+    if not isinstance(forum, discord.ForumChannel) or not forum.permissions_for(poster.member).view_channel:
         raise ApiError(400, "forum_not_found", "That forum channel does not exist.")
 
     async with sub.lock:

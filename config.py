@@ -2,6 +2,21 @@ import json
 
 from pathlib import Path
 
+TAGGER_DEFAULTS: dict[str, str] = {
+    "gpu_space": "Halfabumcake/cl_tagger_v2_gpu",
+    "cpu_space": "Halfabumcake/cl_tagger_v2_cpu",
+    "model_series": "cella110n/cl_tagger_v2",
+    "model_version": "",
+    "infer_mode": "per-tag",
+    "character_threshold": "0.75",
+    "general_threshold": "0.5",
+    "min_best_thr": "0.5",
+    "min_best_f1": "0.2",
+    "use_ood": "true",
+    "gpu_cooldown_minutes": "30",
+}
+
+
 class Config:
     def __init__(self, path: str):
         self.base_path = Path(path)
@@ -13,6 +28,7 @@ class Config:
         self.skip_tags = self.load_set((self.base_path / "skip_tags.json"))
         self.manual_overrides = self.load_dict((self.base_path / "manual_overrides.json"))
         self.api_settings = self.load_dict((self.base_path / "api_settings.json"))
+        self.tagger_settings = self.load_tagger_settings()
 
     @property
     def poster_role_id(self) -> int | None:
@@ -52,6 +68,10 @@ class Config:
         self.skip_tags = self.load_set(self.base_path / "skip_tags.json")
         self.manual_overrides = self.load_dict(self.base_path / "manual_overrides.json")
         self.api_settings = self.load_dict(self.base_path / "api_settings.json")
+        self.tagger_settings = self.load_tagger_settings()
+
+    def load_tagger_settings(self) -> dict:
+        return {**TAGGER_DEFAULTS, **self.load_dict(self.base_path / "tagger_settings.json")}
 
     def load_set(self, path: Path) -> set[str]:
         data = self.load_json(path)

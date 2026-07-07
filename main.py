@@ -5,12 +5,11 @@ import os
 import traceback
 import typing
 import aiohttp
-import httpx
 import uvicorn
-from gradio_client import Client as GraioClient
 from atproto import AsyncClient as BskyClient
 from config import Config
 from db.db import Database
+from services.tagger import TaggerClient
 
 import discord
 from discord.ext import commands
@@ -19,7 +18,7 @@ from dotenv import load_dotenv
 
 class ArtBot(commands.Bot):
     client: aiohttp.ClientSession
-    gradio_client: GraioClient
+    tagger: TaggerClient
     bsky_client: BskyClient
     config: Config
     db: Database
@@ -57,12 +56,8 @@ class ArtBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         self.client = aiohttp.ClientSession(cookies={'PHPSESSID': os.getenv("PIXIV_COOKIE")},headers={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0", "Referer": "https://www.pixiv.net/"})
-        # Default httpx write timeout (5s) trips on large base64 image uploads.
-        self.gradio_client = GraioClient(
-            "Halfabumcake/camie-test",
-            httpx_kwargs={"timeout": httpx.Timeout(60.0, connect=10.0)},
-        )
         self.config = Config(os.getenv("CONFIG_PATH"))
+        self.tagger = TaggerClient(self.config, token=os.getenv("HF_TOKEN"))
         self.db = Database(os.getenv("SQLITE_PATH"))
         
         # Initialize Bluesky client if credentials are provided
@@ -85,7 +80,7 @@ class ArtBot(commands.Bot):
 
     async def close(self) -> None:
         await self.client.close()
-        await self.gradio_client.close()
+        await self.tagger.close()
         await self.db.close()
         await super().close()
 

@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+
+{% block title %}Tagger - Art Bot Admin{% endblock %}
+{% block page_title %}ML Tagger{% endblock %}
+
+{% block content %}
+
+<p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
+    Settings for the cl_tagger_v2 spaces. Predictions try the GPU space first and fall back
+    to the CPU space when the ZeroGPU quota runs out. Changes apply immediately.
+</p>
+
+{% if saved %}
+<div class="mb-4 px-4 py-3 rounded-xl text-sm bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300
+            ring-1 ring-emerald-200 dark:ring-emerald-800/50">
+    Settings saved.
+</div>
+{% endif %}
+
+{% if not bot_running %}
+<div class="mb-4 px-4 py-3 rounded-xl text-sm bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300
+            ring-1 ring-amber-200 dark:ring-amber-800/50">
+    The bot is not running in this process, so settings can be edited but model tests are unavailable.
+</div>
+{% elif gpu_cooldown_min > 0 %}
+<div class="mb-4 px-4 py-3 rounded-xl text-sm bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300
+            ring-1 ring-amber-200 dark:ring-amber-800/50">
+    GPU quota exhausted. Using the CPU space for roughly the next {{ gpu_cooldown_min }} minute(s).
+</div>
+{% endif %}
+
+<div class="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
+
+    <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700/60 p-6">
+        <h2 class="text-sm font-bold text-gray-900 dark:text-gray-100 mb-4">Spaces &amp; Thresholds</h2>
+
+        <form method="post" action="/tagger/settings" class="space-y-4">
+            <div>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">GPU space (tried first)</label>
+                <input type="text" name="gpu_space" value="{{ settings.gpu_space }}"
+                       class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                              bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-mono">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">CPU space (quota fallback)</label>
+                <input type="text" name="cpu_space" value="{{ settings.cpu_space }}"
+                       class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                              bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-mono">
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Model series repo</label>
+                    <input type="text" name="model_series" value="{{ settings.model_series }}"
+                           placeholder="cella110n/cl_tagger_v2"
+                           class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                                  bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-mono">
+                    <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                        Must be in the space's registry (add custom repos via the space's MODEL_REPO_ID secret).
+                    </p>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Model version</label>
+                    <input type="text" name="model_version" value="{{ settings.model_version }}"
+                           placeholder="empty = space default (newest)"
+                           class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                                  bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-mono">
+                    <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                        e.g. v2_00 or v2_01a, applied on first use after a change.
+                    </p>
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Inference mode</label>
+                <select name="infer_mode"
+                        class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                               bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+                    <option value="per-tag" {% if settings.infer_mode != "fixed" %}selected{% endif %}>
+                        Per-tag optimal thresholds (recommended)
+                    </option>
+                    <option value="fixed" {% if settings.infer_mode == "fixed" %}selected{% endif %}>
+                        Fixed per-category thresholds
+                    </option>
+                </select>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        Character/Copyright thr <span class="text-gray-400">(fixed mode)</span>
+                    </label>
+                    <input type="number" step="0.01" min="0" max="1" name="character_threshold"
+                           value="{{ settings.character_threshold }}"
+                           class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                                  bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        General/Meta thr <span class="text-gray-400">(fixed mode)</span>
+                    </label>
+                    <input type="number" step="0.01" min="0" max="1" name="general_threshold"
+                           value="{{ settings.general_threshold }}"
+                           class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                                  bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        Min threshold <span class="text-gray-400">(per-tag mode)</span>
+                    </label>
+                    <input type="number" step="0.01" min="0" max="1" name="min_best_thr"
+                           value="{{ settings.min_best_thr }}"
+                           class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                                  bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        Min tag F1 <span class="text-gray-400">(per-tag mode)</span>
+                    </label>
+                    <input type="number" step="0.01" min="0" max="1" name="min_best_f1"
+                           value="{{ settings.min_best_f1 }}"
+                           class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                                  bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4 items-end">
+                <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 pb-2">
+                    <input type="checkbox" name="use_ood" value="true"
+                           {% if settings.use_ood not in ("false", "0", "no", "off") %}checked{% endif %}
+                           class="rounded border-gray-300 dark:border-gray-600">
+                    OOD detection
+                </label>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">GPU quota cooldown (min)</label>
+                    <input type="number" step="1" min="1" name="gpu_cooldown_minutes"
+                           value="{{ settings.gpu_cooldown_minutes }}"
+                           class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                                  bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+                </div>
+            </div>
+
+            <button type="submit"
+                    class="px-4 py-2 text-sm font-medium text-white rounded-xl transition-all hover:opacity-90"
+                    style="background: linear-gradient(90deg, rgba(0,190,212,0.85) 0%, rgba(77,0,148,0.9) 100%)">
+                Save settings
+            </button>
+        </form>
+    </div>
+
+    <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700/60 p-6">
+        <h2 class="text-sm font-bold text-gray-900 dark:text-gray-100 mb-4">Test the model</h2>
+
+        <form method="post" action="/tagger/test" enctype="multipart/form-data" class="flex flex-wrap items-end gap-3 mb-5">
+            <div class="flex-1 min-w-[180px]">
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Image</label>
+                <input type="file" name="image" accept="image/*" required
+                       class="w-full text-sm text-gray-700 dark:text-gray-300
+                              file:mr-3 file:px-3 file:py-1.5 file:rounded-xl file:border-0 file:text-sm file:font-medium
+                              file:bg-cyan-50 dark:file:bg-cyan-900/30 file:text-cyan-700 dark:file:text-cyan-300">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Instance</label>
+                <select name="instance"
+                        class="px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                               bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+                    <option value="auto">Auto (GPU, then CPU)</option>
+                    <option value="gpu">GPU only</option>
+                    <option value="cpu">CPU only</option>
+                </select>
+            </div>
+            <button type="submit" {% if not bot_running %}disabled{% endif %}
+                    class="px-4 py-2 text-sm font-medium text-white rounded-xl transition-all hover:opacity-90 disabled:opacity-40"
+                    style="background: linear-gradient(90deg, rgba(0,190,212,0.85) 0%, rgba(77,0,148,0.9) 100%)">
+                Run
+            </button>
+        </form>
+
+        {% if test_error %}
+        <div class="px-4 py-3 rounded-xl text-sm bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300
+                    ring-1 ring-red-200 dark:ring-red-800/50">
+            {{ test_error }}
+        </div>
+        {% endif %}
+
+        {% if test_result %}
+        <div class="mb-4 flex flex-wrap items-center gap-2 text-xs">
+            <span class="px-2 py-0.5 rounded-full font-mono bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                {{ test_result.filename }}
+            </span>
+            <span class="px-2 py-0.5 rounded-full font-medium
+                         {% if test_result.instance == 'gpu' %}bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300
+                         {% else %}bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300{% endif %}">
+                {{ test_result.instance | upper }} - {{ test_result.space }}
+            </span>
+            <span class="text-gray-500 dark:text-gray-400">{{ test_result.elapsed }}s</span>
+            {% if test_result.fell_back %}
+            <span class="px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300">
+                fell back
+            </span>
+            {% endif %}
+        </div>
+
+        <div class="mb-4 p-4 rounded-xl bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700/60">
+            <p class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Bot would extract</p>
+            <div class="space-y-1 text-sm">
+                <p><span class="text-gray-500 dark:text-gray-400">Characters:</span>
+                    <span class="font-medium text-gray-900 dark:text-gray-100">
+                        {{ test_result.extracted.characters | join(", ") if test_result.extracted.characters else "none mapped" }}
+                    </span></p>
+                <p><span class="text-gray-500 dark:text-gray-400">Series:</span>
+                    <span class="font-medium text-gray-900 dark:text-gray-100">
+                        {{ test_result.extracted.series or "none mapped" }}
+                    </span></p>
+                <p><span class="text-gray-500 dark:text-gray-400">Safety:</span>
+                    <span class="font-medium text-gray-900 dark:text-gray-100">
+                        {{ test_result.extracted.safety or "none mapped" }}
+                    </span></p>
+            </div>
+        </div>
+
+        {% for cat in ["Character", "Copyright", "Rating", "Quality", "General", "Meta", "Model"] %}
+        {% if test_result.categories.get(cat) %}
+        <details {% if cat in ["Character", "Copyright", "Rating"] %}open{% endif %} class="mb-2">
+            <summary class="cursor-pointer text-xs font-bold text-gray-600 dark:text-gray-300 select-none">
+                {{ cat }} ({{ test_result.categories[cat] | length }})
+            </summary>
+            <div class="mt-1.5 flex flex-wrap gap-1.5">
+                {% for tag, pct in test_result.categories[cat] %}
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs
+                             bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200">
+                    <span class="font-mono">{{ tag }}</span>
+                    <span class="text-gray-400 dark:text-gray-500">{{ pct }}%</span>
+                </span>
+                {% endfor %}
+            </div>
+        </details>
+        {% endif %}
+        {% endfor %}
+        {% endif %}
+    </div>
+</div>
+
+{% endblock %}

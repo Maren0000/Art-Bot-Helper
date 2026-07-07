@@ -98,6 +98,13 @@ CONFIGS: dict[str, dict] = {
         "description": "Userscript API: poster role ID (snowflake) required to use /token, and token expiry in days (0 = never expires).",
         "auto_generated": False,
     },
+    "tagger_settings": {
+        "file": "tagger_settings.json",
+        "type": "dict",
+        "label": "Tagger Settings",
+        "description": "ML tagger spaces, thresholds and GPU to CPU fallback. Edited via the Tagger page.",
+        "auto_generated": False,
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -508,3 +515,140 @@ async def config_save_raw(request: Request, name: str, content: str = Form()):
         )
     save_config(name, data)
     return RedirectResponse(f"/configs/{name}?saved=1", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Tagger routes
+# ---------------------------------------------------------------------------
+
+from base64 import b64encode  # noqa: E402
+
+from config import TAGGER_DEFAULTS  # noqa: E402
+from web.api import get_bot  # noqa: E402
+
+TAGGER_FIELDS: list[tuple[str, str]] = [
+    ("gpu_space", "GPU space (tried first)"),
+    ("cpu_space", "CPU space (quota fallback)"),
+    ("model_series", "Model series repo"),
+    ("model_version", "Model version"),
+    ("infer_mode", "Inference mode"),
+    ("character_threshold", "Character/Copyright threshold (fixed mode)"),
+    ("general_threshold", "General/Meta threshold (fixed mode)"),
+    ("min_best_thr", "Min per-tag threshold (per-tag mode)"),
+    ("min_best_f1", "Min per-tag F1 (per-tag mode)"),
+    ("use_ood", "OOD detection"),
+    ("gpu_cooldown_minutes", "GPU quota cooldown (minutes)"),
+]
+
+TAGGER_EMPTY_OK = {"model_version"}
+
+
+def _effective_tagger_settings() -> dict:
+    bot = get_bot()
+    if bot is not None:
+        return dict(bot.config.tagger_settings)
+    return {**TAGGER_DEFAULTS, **load_config("tagger_settings")}
+
+
+def _tagger_ctx(extra: dict) -> dict:
+    bot = get_bot()
+    cooldown = bot.tagger.gpu_cooldown_remaining() if bot is not None else 0.0
+    return {
+        "active_page": "tagger",
+        "db_path": DB_PATH,
+        "settings": _effective_tagger_settings(),
+        "fields": TAGGER_FIELDS,
+        "bot_running": bot is not None and bot.is_ready(),
+        "gpu_cooldown_min": int(cooldown // 60) + (1 if cooldown % 60 else 0),
+        "test_result": None,
+        "test_error": None,
+        **extra,
+    }
+
+
+@app.get("/tagger", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
+async def tagger_page(request: Request):
+    saved = request.query_params.get("saved") == "1"
+    return templates.TemplateResponse(request, "tagger.html", _tagger_ctx({"saved": saved}))
+
+
+@app.post("/tagger/settings", dependencies=[Depends(require_auth)])
+async def tagger_save_settings(request: Request):
+    form = await request.form()
+    data = {}
+    for key, _ in TAGGER_FIELDS:
+        if key == "use_ood":
+            data[key] = "true" if form.get(key) else "false"
+        elif key in TAGGER_EMPTY_OK:
+            data[key] = str(form.get(key, "")).strip()
+        else:
+            data[key] = str(form.get(key, TAGGER_DEFAULTS[key])).strip() or TAGGER_DEFAULTS[key]
+    save_config("tagger_settings", data)
+    return RedirectResponse("/tagger?saved=1", status_code=303)
+
+
+@app.post("/tagger/test", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
+async def tagger_test(request: Request):
+    bot = get_bot()
+    if bot is None or not bot.is_ready():
+        return templates.TemplateResponse(
+            request, "tagger.html",
+            _tagger_ctx({"saved": False, "test_error": "The bot is not running, so model tests are unavailable."}),
+            status_code=503,
+        )
+
+    form = await request.form()
+    upload = form.get("image")
+    instance = str(form.get("instance", "auto"))
+    if upload is None or not getattr(upload, "filename", ""):
+        return templates.TemplateResponse(
+            request, "tagger.html",
+            _tagger_ctx({"saved": False, "test_error": "Choose an image file to test."}),
+            status_code=400,
+        )
+
+    image_bytes = await upload.read()
+    name = upload.filename.lower()
+    if name.endswith(".png"):
+        mime = "image/png"
+    elif name.endswith(".webp"):
+        mime = "image/webp"
+    elif name.endswith(".gif"):
+        mime = "image/gif"
+    else:
+        mime = "image/jpeg"
+    image_input = {
+        "url": f"data:{mime};base64,{b64encode(image_bytes).decode('utf-8')}",
+        "is_stream": False,
+    }
+
+    try:
+        result = await bot.tagger.predict(
+            image_input, instance=None if instance == "auto" else instance,
+        )
+    except Exception as err:  # noqa: BLE001
+        return templates.TemplateResponse(
+            request, "tagger.html",
+            _tagger_ctx({"saved": False, "test_error": f"Prediction failed: {err}"}),
+            status_code=502,
+        )
+
+    charas = sorted({bot.config.char_map[t] for t in result.characters if t in bot.config.char_map})
+    series = next((bot.config.series_map[t] for t in result.copyrights if t in bot.config.series_map), "")
+    safety = bot.config.safety_map.get(result.rating, "") if result.rating else ""
+
+    test_result = {
+        "filename": upload.filename,
+        "instance": result.instance,
+        "space": result.space,
+        "elapsed": f"{result.elapsed:.1f}",
+        "fell_back": result.fell_back,
+        "categories": {
+            cat: [(tag, f"{prob * 100:.1f}") for tag, prob in tags]
+            for cat, tags in result.categories.items() if tags
+        },
+        "extracted": {"characters": charas, "series": series, "safety": safety},
+    }
+    return templates.TemplateResponse(
+        request, "tagger.html", _tagger_ctx({"saved": False, "test_result": test_result}),
+    )
