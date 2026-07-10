@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+
+{% block title %}Settings — Art Bot Admin{% endblock %}
+{% block page_title %}Settings{% endblock %}
+
+{% block content %}
+
+<p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
+    Bot settings with proper controls. Changes are written to disk and reload immediately.
+</p>
+
+{% if saved == "api" %}
+<div class="mb-4 px-4 py-3 rounded-xl text-sm bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300
+            ring-1 ring-emerald-200 dark:ring-emerald-800/50">
+    API settings saved.
+</div>
+{% elif saved == "tagger" %}
+<div class="mb-4 px-4 py-3 rounded-xl text-sm bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300
+            ring-1 ring-emerald-200 dark:ring-emerald-800/50">
+    Tagger settings saved.
+</div>
+{% endif %}
+
+<div class="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
+
+    {# =================== API / Userscript =================== #}
+    <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700/60 p-6">
+        <h2 class="text-sm font-bold text-gray-900 dark:text-gray-100 mb-1">API &amp; Userscript</h2>
+        <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
+            Controls who may use <span class="font-mono">/token</span> and how long userscript tokens last.
+        </p>
+
+        {% if api_error %}
+        <div class="mb-4 px-4 py-3 rounded-xl text-sm bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300
+                    ring-1 ring-red-200 dark:ring-red-800/50">
+            {{ api_error }}
+        </div>
+        {% endif %}
+
+        <form method="post" action="/settings/api" class="space-y-4">
+            <div>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Poster role ID</label>
+                <input type="text" name="poster_role_id" value="{{ api.poster_role_id }}"
+                       inputmode="numeric" pattern="[0-9]*" placeholder="e.g. 1391879389821538424"
+                       class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                              bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-mono">
+                <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                    Discord role snowflake required to post via the userscript. Leave blank to disable the API.
+                </p>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Token expiry (days)</label>
+                <input type="number" name="token_expiry_days" value="{{ api.token_expiry_days }}" min="0" step="1"
+                       class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                              bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+                <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                    Days before a linked userscript token expires. <span class="font-mono">0</span> = never expires.
+                </p>
+            </div>
+            <button type="submit"
+                    class="px-4 py-2 text-sm font-medium text-white rounded-xl transition-all hover:opacity-90"
+                    style="background: linear-gradient(90deg, rgba(0,190,212,0.85) 0%, rgba(77,0,148,0.9) 100%)">
+                Save API settings
+            </button>
+        </form>
+    </div>
+
+    {# =================== ML Tagger model =================== #}
+    <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700/60 p-6">
+        <h2 class="text-sm font-bold text-gray-900 dark:text-gray-100 mb-1">ML Tagger model</h2>
+        <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
+            Spaces, model and thresholds for cl_tagger_v2. Predictions try the GPU space first and fall back to CPU
+            when the ZeroGPU quota runs out. Test images on the <a href="/tagger" class="text-cyan-600 dark:text-cyan-400 hover:underline">ML Tagger</a> page.
+        </p>
+
+        {% if not bot_running %}
+        <div class="mb-4 px-4 py-3 rounded-xl text-sm bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300
+                    ring-1 ring-amber-200 dark:ring-amber-800/50">
+            The bot is not running in this process. Settings can still be edited.
+        </div>
+        {% elif gpu_cooldown_min > 0 %}
+        <div class="mb-4 px-4 py-3 rounded-xl text-sm bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300
+                    ring-1 ring-amber-200 dark:ring-amber-800/50">
+            GPU quota exhausted. Using the CPU space for roughly the next {{ gpu_cooldown_min }} minute(s).
+        </div>
+        {% endif %}
+
+        <form method="post" action="/settings/tagger" class="space-y-4">
+            <div>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">GPU space (tried first)</label>
+                <input type="text" name="gpu_space" value="{{ tagger.gpu_space }}"
+                       class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                              bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-mono">
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">CPU space (quota fallback)</label>
+                <input type="text" name="cpu_space" value="{{ tagger.cpu_space }}"
+                       class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                              bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-mono">
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Model series repo</label>
+                    <input type="text" name="model_series" value="{{ tagger.model_series }}"
+                           placeholder="cella110n/cl_tagger_v2"
+                           class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                                  bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-mono">
+                    <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                        Must be in the space's registry (add custom repos via the space's MODEL_REPO_ID secret).
+                    </p>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Model version</label>
+                    <input type="text" name="model_version" value="{{ tagger.model_version }}"
+                           placeholder="empty = space default (newest)"
+                           class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                                  bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-mono">
+                    <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                        e.g. v2_00 or v2_01a, applied on first use after a change.
+                    </p>
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Inference mode</label>
+                <select name="infer_mode"
+                        class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                               bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+                    <option value="per-tag" {% if tagger.infer_mode != "fixed" %}selected{% endif %}>
+                        Per-tag optimal thresholds (recommended)
+                    </option>
+                    <option value="fixed" {% if tagger.infer_mode == "fixed" %}selected{% endif %}>
+                        Fixed per-category thresholds
+                    </option>
+                </select>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        Character/Copyright thr <span class="text-gray-400">(fixed mode)</span>
+                    </label>
+                    <input type="number" step="0.01" min="0" max="1" name="character_threshold"
+                           value="{{ tagger.character_threshold }}"
+                           class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                                  bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        General/Meta thr <span class="text-gray-400">(fixed mode)</span>
+                    </label>
+                    <input type="number" step="0.01" min="0" max="1" name="general_threshold"
+                           value="{{ tagger.general_threshold }}"
+                           class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                                  bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        Min threshold <span class="text-gray-400">(per-tag mode)</span>
+                    </label>
+                    <input type="number" step="0.01" min="0" max="1" name="min_best_thr"
+                           value="{{ tagger.min_best_thr }}"
+                           class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                                  bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        Min tag F1 <span class="text-gray-400">(per-tag mode)</span>
+                    </label>
+                    <input type="number" step="0.01" min="0" max="1" name="min_best_f1"
+                           value="{{ tagger.min_best_f1 }}"
+                           class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                                  bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4 items-end">
+                <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 pb-2">
+                    <input type="checkbox" name="use_ood" value="true"
+                           {% if tagger.use_ood not in ("false", "0", "no", "off") %}checked{% endif %}
+                           class="rounded border-gray-300 dark:border-gray-600">
+                    OOD detection
+                </label>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">GPU quota cooldown (min)</label>
+                    <input type="number" step="1" min="1" name="gpu_cooldown_minutes"
+                           value="{{ tagger.gpu_cooldown_minutes }}"
+                           class="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-600
+                                  bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+                </div>
+            </div>
+
+            <button type="submit"
+                    class="px-4 py-2 text-sm font-medium text-white rounded-xl transition-all hover:opacity-90"
+                    style="background: linear-gradient(90deg, rgba(0,190,212,0.85) 0%, rgba(77,0,148,0.9) 100%)">
+                Save tagger settings
+            </button>
+        </form>
+    </div>
+</div>
+
+{% endblock %}

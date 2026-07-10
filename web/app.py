@@ -10,7 +10,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import Cookie, Depends, FastAPI, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from tortoise import Tortoise
 from tortoise.functions import Count
@@ -106,6 +106,11 @@ CONFIGS: dict[str, dict] = {
         "auto_generated": False,
     },
 }
+
+# These live on the dedicated Settings page with proper form controls, so they
+# are hidden from the Maps grid and the generic dict/list editors. They stay in
+# CONFIGS so load_config/save_config still resolve their files.
+SETTINGS_FILES: set[str] = {"api_settings", "tagger_settings"}
 
 # ---------------------------------------------------------------------------
 # Database lifespan — only initialise Tortoise when running standalone.
@@ -389,6 +394,8 @@ def _config_ctx(name: str, extra: dict) -> dict:
 async def configs_overview(request: Request):
     items = []
     for name, meta in CONFIGS.items():
+        if name in SETTINGS_FILES:
+            continue
         data = load_config(name)
         items.append({
             "name": name, "label": meta["label"], "description": meta["description"],
@@ -410,6 +417,8 @@ async def config_view(
 ):
     if name not in CONFIGS:
         raise HTTPException(status_code=404, detail="Config not found")
+    if name in SETTINGS_FILES:
+        return RedirectResponse("/settings", status_code=303)
 
     meta = CONFIGS[name]
     data = load_config(name)
@@ -447,7 +456,7 @@ async def config_view(
 
 @app.post("/configs/{name}/add", dependencies=[Depends(require_auth)])
 async def config_add(name: str, key: str = Form(""), value: str = Form(""), item: str = Form("")):
-    if name not in CONFIGS:
+    if name not in CONFIGS or name in SETTINGS_FILES:
         raise HTTPException(status_code=404)
     meta = CONFIGS[name]
     data = load_config(name)
@@ -468,7 +477,7 @@ async def config_edit_entry(
     new_key: str = Form(),
     new_value: str = Form(),
 ):
-    if name not in CONFIGS or CONFIGS[name]["type"] != "dict":
+    if name not in CONFIGS or CONFIGS[name]["type"] != "dict" or name in SETTINGS_FILES:
         raise HTTPException(status_code=404)
     data = load_config(name)
     if old_key in data:
@@ -487,7 +496,7 @@ async def config_delete_entry(
     key: str = Form(""),
     item: str = Form(""),
 ):
-    if name not in CONFIGS:
+    if name not in CONFIGS or name in SETTINGS_FILES:
         raise HTTPException(status_code=404)
     meta = CONFIGS[name]
     data = load_config(name)
@@ -515,6 +524,92 @@ async def config_save_raw(request: Request, name: str, content: str = Form()):
         )
     save_config(name, data)
     return RedirectResponse(f"/configs/{name}?saved=1", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Bulk JSON import (dict maps) — append new keys, diff+confirm overwrites
+# ---------------------------------------------------------------------------
+
+
+def _normalize_value(value) -> str:
+    return value if isinstance(value, str) else str(value)
+
+
+def _bulk_diff(name: str, content: str) -> tuple[list, list, int]:
+    """Compare a pasted JSON object against the on-disk map.
+
+    Returns (additions, conflicts, unchanged_count) where additions are keys
+    not present yet and conflicts are keys whose value would change.
+    Raises json.JSONDecodeError or ValueError on bad input.
+    """
+    parsed = json.loads(content)
+    if not isinstance(parsed, dict):
+        raise ValueError("JSON must be an object of \"key\": \"value\" pairs.")
+    current = load_config(name)
+    additions, conflicts, unchanged = [], [], 0
+    for raw_key, raw_val in parsed.items():
+        key = str(raw_key).strip()
+        if not key:
+            continue
+        val = _normalize_value(raw_val)
+        if key not in current:
+            additions.append({"key": key, "value": val})
+        elif str(current[key]) != val:
+            conflicts.append({"key": key, "old": str(current[key]), "new": val})
+        else:
+            unchanged += 1
+    return additions, conflicts, unchanged
+
+
+@app.post("/configs/{name}/bulk-preview", dependencies=[Depends(require_auth)])
+async def config_bulk_preview(name: str, content: str = Form("")):
+    if name not in CONFIGS or CONFIGS[name]["type"] != "dict" or name in SETTINGS_FILES:
+        raise HTTPException(status_code=404)
+    try:
+        additions, conflicts, unchanged = _bulk_diff(name, content)
+    except json.JSONDecodeError as exc:
+        return JSONResponse({"error": f"Invalid JSON: {exc}"}, status_code=400)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return JSONResponse({
+        "additions": additions,
+        "conflicts": conflicts,
+        "unchanged": unchanged,
+        "add_count": len(additions),
+        "conflict_count": len(conflicts),
+    })
+
+
+@app.post("/configs/{name}/bulk-apply", dependencies=[Depends(require_auth)])
+async def config_bulk_apply(request: Request, name: str):
+    if name not in CONFIGS or CONFIGS[name]["type"] != "dict" or name in SETTINGS_FILES:
+        raise HTTPException(status_code=404)
+    form = await request.form()
+    try:
+        parsed = json.loads(str(form.get("content", "")))
+    except json.JSONDecodeError as exc:
+        return JSONResponse({"error": f"Invalid JSON: {exc}"}, status_code=400)
+    if not isinstance(parsed, dict):
+        return JSONResponse({"error": "JSON must be an object."}, status_code=400)
+
+    # Only keys the user ticked are allowed to overwrite an existing value.
+    overwrite_keys = set(form.getlist("overwrite_keys"))
+    data = load_config(name)
+    added = overwritten = 0
+    for raw_key, raw_val in parsed.items():
+        key = str(raw_key).strip()
+        if not key:
+            continue
+        val = _normalize_value(raw_val)
+        if key not in data:
+            data[key] = val
+            added += 1
+        elif str(data[key]) != val and key in overwrite_keys:
+            data[key] = val
+            overwritten += 1
+    if added or overwritten:
+        save_config(name, data)
+    return JSONResponse({"added": added, "overwritten": overwritten})
 
 
 # ---------------------------------------------------------------------------
@@ -570,21 +665,6 @@ def _tagger_ctx(extra: dict) -> dict:
 async def tagger_page(request: Request):
     saved = request.query_params.get("saved") == "1"
     return templates.TemplateResponse(request, "tagger.html", _tagger_ctx({"saved": saved}))
-
-
-@app.post("/tagger/settings", dependencies=[Depends(require_auth)])
-async def tagger_save_settings(request: Request):
-    form = await request.form()
-    data = {}
-    for key, _ in TAGGER_FIELDS:
-        if key == "use_ood":
-            data[key] = "true" if form.get(key) else "false"
-        elif key in TAGGER_EMPTY_OK:
-            data[key] = str(form.get(key, "")).strip()
-        else:
-            data[key] = str(form.get(key, TAGGER_DEFAULTS[key])).strip() or TAGGER_DEFAULTS[key]
-    save_config("tagger_settings", data)
-    return RedirectResponse("/tagger?saved=1", status_code=303)
 
 
 @app.post("/tagger/test", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
@@ -652,3 +732,74 @@ async def tagger_test(request: Request):
     return templates.TemplateResponse(
         request, "tagger.html", _tagger_ctx({"saved": False, "test_result": test_result}),
     )
+
+
+# ---------------------------------------------------------------------------
+# Settings routes (API + tagger model settings, with proper form controls)
+# ---------------------------------------------------------------------------
+
+API_DEFAULTS: dict[str, str] = {"poster_role_id": "", "token_expiry_days": "0"}
+
+
+def _effective_api_settings() -> dict:
+    bot = get_bot()
+    raw = dict(bot.config.api_settings) if bot is not None else load_config("api_settings")
+    return {**API_DEFAULTS, **(raw if isinstance(raw, dict) else {})}
+
+
+def _settings_ctx(extra: dict) -> dict:
+    bot = get_bot()
+    cooldown = bot.tagger.gpu_cooldown_remaining() if bot is not None else 0.0
+    return {
+        "active_page": "settings",
+        "db_path": DB_PATH,
+        "api": _effective_api_settings(),
+        "tagger": _effective_tagger_settings(),
+        "bot_running": bot is not None and bot.is_ready(),
+        "gpu_cooldown_min": int(cooldown // 60) + (1 if cooldown % 60 else 0),
+        "saved": None,
+        "api_error": None,
+        **extra,
+    }
+
+
+@app.get("/settings", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
+async def settings_page(request: Request):
+    return templates.TemplateResponse(
+        request, "settings.html", _settings_ctx({"saved": request.query_params.get("saved")}),
+    )
+
+
+@app.post("/settings/api", dependencies=[Depends(require_auth)])
+async def settings_save_api(request: Request):
+    form = await request.form()
+    role = str(form.get("poster_role_id", "")).strip()
+    days = str(form.get("token_expiry_days", "0")).strip() or "0"
+    if role and not role.isdigit():
+        return templates.TemplateResponse(
+            request, "settings.html",
+            _settings_ctx({
+                "api_error": "Poster role ID must be a numeric Discord ID (or left blank).",
+                "api": {"poster_role_id": role, "token_expiry_days": days},
+            }),
+            status_code=400,
+        )
+    if not days.isdigit():
+        days = "0"
+    save_config("api_settings", {"poster_role_id": role, "token_expiry_days": days})
+    return RedirectResponse("/settings?saved=api", status_code=303)
+
+
+@app.post("/settings/tagger", dependencies=[Depends(require_auth)])
+async def settings_save_tagger(request: Request):
+    form = await request.form()
+    data = {}
+    for key, _ in TAGGER_FIELDS:
+        if key == "use_ood":
+            data[key] = "true" if form.get(key) else "false"
+        elif key in TAGGER_EMPTY_OK:
+            data[key] = str(form.get(key, "")).strip()
+        else:
+            data[key] = str(form.get(key, TAGGER_DEFAULTS[key])).strip() or TAGGER_DEFAULTS[key]
+    save_config("tagger_settings", data)
+    return RedirectResponse("/settings?saved=tagger", status_code=303)
