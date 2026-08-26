@@ -31,6 +31,17 @@ DEFAULT_OUTPUT_FILE = "char_map.json"
 PAREN_RE = re.compile(r"\(([^)]+)\)")
 
 
+class ConfigNotReady(RuntimeError):
+    """Raised when the character map cannot be rebuilt because configs are unset.
+
+    build_mapping() keeps a Danbooru character tag only if its trailing
+    parenthesised series is in config.target_series. An empty target_series
+    therefore matches nothing, and run_update() would happily write an empty
+    char_map.json over a good one after several minutes of scraping. Fail
+    loudly and early instead -- see the guard in run_update().
+    """
+
+
 def fetch_all_character_tags():
     all_tags = []
     page = 1
@@ -260,10 +271,25 @@ def write_character_map(mapping: dict[str, str], output_file: Path) -> None:
         json.dump(mapping, f, indent=2, ensure_ascii=False)
 
 
+def config_ready(config: Config) -> bool:
+    """Whether there is enough config for a rebuild to produce anything."""
+    return bool(config.target_series)
+
+
 def run_update(
     config: Config,
     output_file: Path | None = None,
 ) -> int:
+    # Refuse before scraping, not after. Without target_series every fetched
+    # tag is filtered out, so the run costs several minutes of Danbooru
+    # requests and then truncates char_map.json to {}. Populate
+    # target_series.json in the web UI (Configs -> Target Series) first.
+    if not config_ready(config):
+        raise ConfigNotReady(
+            f"target_series is empty ({config.base_path / 'target_series.json'}); "
+            "set it up in the web UI before refreshing the character map"
+        )
+
     output_file = output_file or (config.base_path / DEFAULT_OUTPUT_FILE)
     mapping = generate_character_map(config)
     write_character_map(mapping, output_file)
@@ -272,8 +298,12 @@ def run_update(
 
 
 def main():
+    logging.basicConfig(level=logging.INFO)
     config = Config(str(DEFAULT_CONFIG_DIR))
-    run_update(config)
+    try:
+        run_update(config)
+    except ConfigNotReady as e:
+        raise SystemExit(f"Refusing to rebuild the character map: {e}")
 
 
 if __name__ == "__main__":

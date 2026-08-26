@@ -1,0 +1,19 @@
+.git
+.gitignore
+.forgejo
+__pycache__
+*.py[cod]
+.venv
+venv
+.env
+*.db
+*.db-wal
+*.db-shm
+# Local config dir -- the container reads CONFIG_PATH=/config from a volume.
+configs
+compose.yml
+docker-compose*.yml
+Dockerfile
+.dockerignore
+*.md
+userscript

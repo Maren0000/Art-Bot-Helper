@@ -5,7 +5,7 @@ from base64 import b64encode
 
 from discord.ext import commands, tasks
 
-from utils.tag_extract import run_update
+from utils.tag_extract import ConfigNotReady, config_ready, run_update
 
 
 class Tasks(commands.Cog):
@@ -55,7 +55,27 @@ class Tasks(commands.Cog):
 
     @tasks.loop(hours=24*10)
     async def char_map_refresh(self) -> None:
-        """Rebuild the character map from Danbooru data on a schedule."""
+        """Rebuild the character map from Danbooru data on a schedule.
+
+        tasks.loop fires its first iteration as soon as before_loop returns, so
+        this runs on every container start, not 10 days in. On a fresh deploy
+        the config volume is empty, and a rebuild with no target_series scrapes
+        all of Danbooru's tags/aliases/wiki for several minutes and then writes
+        an empty char_map.json. Skip until the configs are actually set up in
+        the web UI; the loop retries on its normal schedule.
+        """
+        if not config_ready(self.bot.config):
+            self.logger.warning(
+                "Skipping character map refresh: target_series is empty. "
+                "Populate it in the web UI (Configs -> Target Series) to enable "
+                "automatic character pulling."
+            )
+            await self._send_task_update(
+                "Character map refresh skipped: no target series configured yet. "
+                "Set them up in the web UI to enable automatic character pulling."
+            )
+            return
+
         await self._send_task_update("Character map refresh task started.")
         try:
             total = await asyncio.to_thread(run_update, self.bot.config)
@@ -65,6 +85,9 @@ class Tasks(commands.Cog):
             await self._send_task_update(
                 f"Character map refresh task finished successfully with {total} entries."
             )
+        except ConfigNotReady as e:
+            self.logger.warning(f"Character map refresh skipped: {e}")
+            await self._send_task_update(f"Character map refresh task skipped: {e}")
         except Exception as e:
             self.logger.error(f"Character map refresh failed: {e}")
             await self._send_task_update(f"Character map refresh task failed: {e}")

@@ -153,6 +153,13 @@ app.include_router(api_router)
 app.add_exception_handler(ApiError, api_error_handler)
 
 
+# Unauthenticated on purpose: the container healthcheck has no session cookie.
+# It reports liveness only and leaks nothing about the library or the guilds.
+@app.get("/healthz")
+async def healthz() -> JSONResponse:
+    return JSONResponse({"status": "ok"})
+
+
 def build_page_url(page: int, platform: str, guild_id: str, search: str) -> str:
     params: dict[str, str] = {"page": str(page)}
     if platform:

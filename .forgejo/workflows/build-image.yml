@@ -1,0 +1,93 @@
+# Build the image on every push to main, publish it to this Forgejo instance's
+# container registry, then poke Portainer to redeploy.
+#
+# Why not let Portainer build from source? Portainer does not rebuild images for
+# git stacks that use `build:` - "Pull & Redeploy" git-pulls the compose file and
+# then reuses the cached image, even with re-pull and force-redeploy enabled. See
+# portainer/portainer#6288, #6897, #11304, #12508. A push would look like it
+# deployed and silently serve the old code, so the image is built here and
+# Portainer only pulls.
+#
+# The redeploy is triggered as the LAST step, after the push completes. Wiring
+# Forgejo's own push webhook straight to Portainer would race the build and
+# redeploy the previous image.
+#
+# Required secrets (repo Settings -> Actions -> Secrets):
+#   REGISTRY_USER          Forgejo username that owns the package
+#   REGISTRY_TOKEN         Forgejo token with write:package scope
+#   PORTAINER_WEBHOOK_URL  https://docker.priv.maren.dev/api/stacks/webhooks/<uuid>
+#
+# Runner requirements: the `linux-amd64` label runs jobs in node:22-bookworm,
+# which has no container tooling, so the docker client is fetched per-job below.
+# The engine behind the socket is rootful Podman via its Docker-compatible API -
+# hence DOCKER_BUILDKIT=0, since that API implements the classic /build endpoint
+# and not BuildKit. Keep the Dockerfile free of heredocs and --mount flags.
+
+name: build-image
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: git.priv.maren.dev
+  IMAGE: git.priv.maren.dev/maren/art-bot-helper
+  DOCKER_BUILDKIT: "0"
+  DOCKER_CLI_VERSION: "27.5.1"
+
+jobs:
+  # A syntax error in a cog is not caught until discord.py tries to load the
+  # extension at runtime, where it is swallowed into a log line and the bot
+  # keeps running without that command. Compiling every module here turns that
+  # into a red pipeline before an image is pushed.
+  check:
+    runs-on: linux-amd64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Byte-compile every module
+        run: python -m compileall -q cogs db services utils web main.py config.py exception.py view.py
+
+  build:
+    # This is the runner's LABEL, not its name - `miku-pve` is the name and
+    # matches nothing, leaving the job queued forever.
+    runs-on: linux-amd64
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+
+      # node:22-bookworm has no container tooling. Pull just the client out of
+      # Docker's static bundle - the daemon binaries in that tarball are not
+      # extracted; the socket mounted into this job is served by Podman on the
+      # runner host.
+      - name: Install docker client
+        run: |
+          curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" \
+            | tar xz -C /usr/local/bin --strip-components=1 docker/docker
+          docker version --format '{{.Server.Version}}' || docker version
+
+      - name: Log in to the container registry
+        run: |
+          echo '${{ secrets.REGISTRY_TOKEN }}' \
+            | docker login "$REGISTRY" -u '${{ secrets.REGISTRY_USER }}' --password-stdin
+
+      # Two tags: :latest is what the stack tracks, :<sha> is the rollback
+      # handle. Set ABH_TAG in the Portainer stack's env to pin a sha.
+      - name: Build image
+        run: |
+          docker build \
+            --build-arg GIT_SHA="${{ github.sha }}" \
+            --tag "$IMAGE:${{ github.sha }}" \
+            --tag "$IMAGE:latest" \
+            .
+
+      - name: Push image
+        run: |
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"
+
+      - name: Trigger Portainer redeploy
+        run: curl -fsS -X POST '${{ secrets.PORTAINER_WEBHOOK_URL }}'

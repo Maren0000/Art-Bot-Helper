@@ -1,16 +1,28 @@
-version: "3"
+# LOCAL DEV ONLY. Builds from source and bind-mounts the tree so edits are
+# picked up on restart. Do NOT point a Portainer stack at this file -- use
+# docker-compose.portainer.yml, which pulls the CI-built image. Portainer will
+# not rebuild a `build:` stack on redeploy (portainer/portainer#6288 et al), so
+# a push would silently keep serving the old code.
+
 services:
   bot:
     container_name: art-bot-helper
-    command: python main.py
     build:
       context: .
       dockerfile: Dockerfile
     volumes:
+      # Live source. The image already has a copy; this shadows it for dev.
       - ./:/app
-      - /conf/art-bot-config:/app/configs
+      - ./configs:/config
+      - ./data:/data
+    environment:
+      - CONFIG_PATH=/config
+      - SQLITE_PATH=/data/artbot.db
+      - WEB_HOST=0.0.0.0
+      - WEB_PORT=8000
+      - MODE=DEV
     env_file:
-      - stack.env
+      - .env
     restart: unless-stopped
     ports:
-      - 8005:8005
+      - "8005:8000"

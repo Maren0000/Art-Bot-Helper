@@ -4,7 +4,7 @@ from discord.ext import commands
 import discord
 import json
 
-from utils.tag_extract import run_update
+from utils.tag_extract import ConfigNotReady, run_update
 
 class UpdateCog(commands.Cog):
     def __init__(self, bot):
@@ -42,7 +42,8 @@ class UpdateCog(commands.Cog):
         try:
             json_data = await json_file.read()
             self.bot.char_map = json.loads(json_data)
-            open("./configs/char_map.json", "wb").write(json_data)
+            (self.bot.config.base_path / "char_map.json").write_bytes(json_data)
+            self.bot.config.reload_all()
             await ctx.send("✅ Character map updated successfully.")
         except Exception as e:
             await ctx.send(f"❌ Failed to update character map: {e}")
@@ -67,7 +68,8 @@ class UpdateCog(commands.Cog):
         try:
             json_data = await json_file.read()
             self.bot.series_map = json.loads(json_data)
-            open("./configs/series_map.json", "wb").write(json_data)
+            (self.bot.config.base_path / "series_map.json").write_bytes(json_data)
+            self.bot.config.reload_all()
             await ctx.send("✅ Series map updated successfully.")
         except Exception as e:
             await ctx.send(f"❌ Failed to update series map: {e}")
@@ -92,7 +94,8 @@ class UpdateCog(commands.Cog):
         try:
             json_data = await json_file.read()
             self.bot.webhooks = json.loads(json_data)
-            open("./configs/webhooks.json", "wb").write(json_data)
+            (self.bot.config.base_path / "webhooks.json").write_bytes(json_data)
+            self.bot.config.reload_all()
             await ctx.send("Webhooks updated successfully.")
         except Exception as e:
             await ctx.send(f"Failed to update webhooks: {e}")
@@ -109,6 +112,12 @@ class UpdateCog(commands.Cog):
             total = await asyncio.to_thread(run_update, self.bot.config)
             self.bot.config.reload_char_map()
             await ctx.send(f"Character map refresh completed with {total} entries.")
+        except ConfigNotReady as e:
+            await ctx.send(
+                f"Character map refresh skipped: {e}\n"
+                "Add the series you care about under Configs -> Target Series in the web UI, "
+                "then run this again."
+            )
         except Exception as e:
             await ctx.send(f"Character map refresh failed: {e}")
 

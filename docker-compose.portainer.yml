@@ -1,0 +1,73 @@
+# Server-side compose for the Portainer stack. Point the stack's "Compose path"
+# at this file, NOT at compose.yml - that one is the local-dev definition and
+# does not survive the trip to a server:
+#
+#   * it builds from source, and Portainer will not rebuild a `build:` stack on
+#     redeploy (portainer/portainer#6288 et al), so a push would silently keep
+#     serving the old image;
+#   * its ./ bind mounts resolve against Portainer's clone dir, where Docker
+#     creates them root-owned, and the container runs as uid 1001.
+#
+# So: prebuilt image from the Forgejo registry, named volumes, no bind mounts.
+# Set ABH_TAG in the stack's env to pin a specific commit; leave it unset to
+# track whatever the last build pushed.
+
+services:
+  bot:
+    image: git.priv.maren.dev/maren/art-bot-helper:${ABH_TAG:-latest}
+    container_name: art-bot-helper
+    restart: unless-stopped
+    ports:
+      # Host 8005 -> uvicorn on 8000. The admin UI and the userscript API share
+      # this port; put the reverse proxy in front of it and set ABH_PUBLIC_URL
+      # to the external hostname.
+      - "${ABH_WEB_PORT:-8005}:8000"
+    volumes:
+      # Bot config JSONs: char_map, series_map, safety_map, webhooks,
+      # target_series, skip_tags, manual_overrides, api/tagger settings.
+      # Starts EMPTY on a fresh deploy - upload them via the web UI. Automatic
+      # character pulling stays disabled until target_series.json is populated
+      # (see cogs/tasks.py char_map_refresh).
+      - abh-config:/config
+      # artbot.db plus its -wal/-shm. Losing this loses every posted-image
+      # record, which is what duplicate detection is built on. Back it up.
+      - abh-data:/data
+    environment:
+      - CONFIG_PATH=/config
+      - SQLITE_PATH=/data/artbot.db
+      # uvicorn must bind all interfaces inside the container; main.py defaults
+      # to 127.0.0.1, which would make the published port answer nothing.
+      - WEB_HOST=0.0.0.0
+      - WEB_PORT=8000
+      # REQUIRED. Discord bot token.
+      - TOKEN=${ABH_DISCORD_TOKEN}
+      # REQUIRED, and the admin UI is open to anyone if it is blank:
+      # require_auth() rejects every session when ADMIN_PASSWORD is unset, so
+      # the UI is unusable rather than exposed - but set it anyway.
+      - ADMIN_USERNAME=${ABH_ADMIN_USER}
+      - ADMIN_PASSWORD=${ABH_ADMIN_PASS}
+      # Signs both the admin session cookie and the userscript API tokens. If
+      # unset it silently falls back to TOKEN; set it explicitly so rotating
+      # the bot token does not invalidate every issued userscript token.
+      - WEB_SECRET=${ABH_WEB_SECRET}
+      # Pixiv PHPSESSID cookie - without it Pixiv fetches return 403.
+      - PIXIV_COOKIE=${ABH_PIXIV_COOKIE}
+      # Hugging Face token for the cl_tagger spaces used by ML tagging.
+      - HF_TOKEN=${ABH_HF_TOKEN}
+      # Optional: Bluesky support is skipped entirely when either is blank.
+      - BLUESKY_IDENTIFIER=${ABH_BSKY_ID:-}
+      - BLUESKY_APP_PASSWORD=${ABH_BSKY_PASS:-}
+      # Optional: channel the scheduled tasks report into.
+      - TASK_STATUS_CHANNEL_ID=${ABH_TASK_CHANNEL_ID:-}
+    healthcheck:
+      # /healthz is the one unauthenticated route; every other page redirects to
+      # /login, which would still return 200 and hide a broken app.
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  abh-config:
+  abh-data:
