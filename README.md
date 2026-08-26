@@ -86,6 +86,44 @@ Notes on the implementation:
   `request.url.scheme` is correct; otherwise cookies would never be marked
   `Secure` and a derived `redirect_uri` would come out as `http://`.
 
+### How the character map is built
+
+`char_map.json` is generated from Danbooru in two passes, because Danbooru only
+appends a `(series)` qualifier to a character tag when the name would otherwise
+be ambiguous.
+
+1. **Qualified tags** — `elysia_(honkai_impact)`, `belle_(zenless_zone_zero)`.
+   Matched by comparing the trailing parenthesised qualifier against
+   `target_series.json`.
+2. **Unqualified tags** — `kiana_kaslana`, `ellen_joe`, `hoshimi_miyabi`. These
+   carry no series information at all, so membership is inferred from
+   co-occurrence with the series' copyright tag via Danbooru's `related_tag`
+   API. A tag is accepted at an `overlap_coefficient` of 0.5 or above with at
+   least 20 posts; real members measure 0.93–1.0 while crossover appearances
+   measure 0.001–0.14.
+
+Pass 2 matters more than it sounds. For Zenless Zone Zero, 35 of the 60 most
+common characters are unqualified, including the entire top of the roster.
+
+**Put the qualifier in `target_series.json`, not the copyright tag.** They are
+different namespaces and do not always agree:
+
+| Series | Copyright tag | Character qualifier |
+| --- | --- | --- |
+| Zenless Zone Zero | `zenless_zone_zero` | `zenless_zone_zero` |
+| Honkai Impact 3rd | `honkai_impact_3rd` | `honkai_impact` |
+
+`honkai_impact` is not a Danbooru tag at all — it exists only inside character
+names. Pass 1 matches on the qualifier, so `target_series.json` must hold
+`honkai_impact`; pass 2 then resolves that to the copyright tag `honkai_impact_3rd`
+automatically by probing a known character of the series. Listing both forms is
+harmless if you are unsure.
+
+Resolution deliberately prefers the *narrowest* copyright tag. Elysia scores
+0.9998 against `honkai_(series)` and 0.9994 against `honkai_impact_3rd`, so
+picking the strongest match alone would select the umbrella franchise and pull
+the Star Rail cast into Honkai Impact.
+
 ### Webhooks are config, not environment
 
 `webhooks.json` maps a forum channel name to a list of **Discord webhook URLs**,

@@ -14,6 +14,11 @@ LOGGER = logging.getLogger(__name__)
 DANBOORU_BASE_URL = "https://danbooru.donmai.us/tags.json"
 DANBOORU_ALIAS_URL = "https://danbooru.donmai.us/tag_aliases.json"
 DANBOORU_WIKI_URL = "https://danbooru.donmai.us/wiki_pages.json"
+DANBOORU_RELATED_URL = "https://danbooru.donmai.us/related_tag.json"
+DANBOORU_TAGS_LOOKUP_URL = "https://danbooru.donmai.us/tags.json"
+
+CATEGORY_COPYRIGHT = 3
+CATEGORY_CHARACTER = 4
 
 USER_AGENT = "Art-Bot-Helper/1.0"
 
@@ -22,6 +27,28 @@ SESSION.headers.update({"User-Agent": USER_AGENT})
 
 FETCH_LIMIT = 1000
 SLEEP_TIME = 0.1
+
+# Thresholds for the unqualified-character pass (see fetch_series_characters).
+# Danbooru only appends a "(series)" qualifier to a character tag when the name
+# would otherwise be ambiguous, so most characters with a distinctive name --
+# kiana_kaslana, ellen_joe, hoshimi_miyabi -- carry no series at all. Those tags
+# have nothing to match on, so membership is inferred from co-occurrence with
+# the series' copyright tag instead.
+#
+# overlap_coefficient is |A n B| / min(|A|, |B|): 1.0 means every post with the
+# character is also tagged with this series. Real members measure 0.93-1.0;
+# crossover appearances from other franchises measure 0.001-0.14, so the gap is
+# wide and 0.5 sits comfortably in it. The post floor exists because a tag with
+# two posts that happen to be crossovers also scores 1.0.
+UNQUALIFIED_MIN_OVERLAP = 0.5
+UNQUALIFIED_MIN_POSTS = 20
+# A character sits inside several nested copyright tags at once. Elysia scores
+# 0.9998 against honkai_(series) and 0.9994 against honkai_impact_3rd, so
+# "highest overlap" picks the umbrella franchise and drags in Star Rail. Treat
+# anything above this as a match and then take the most specific one.
+COPYRIGHT_MIN_OVERLAP = 0.9
+RELATED_LIMIT = 1000
+RELATED_RETRIES = 3
 
 DEFAULT_CONFIG_DIR = Path(
     os.getenv("CONFIG_PATH", str(Path(__file__).resolve().parents[1] / "configs"))
@@ -132,6 +159,149 @@ def fetch_all_wiki_pages():
 
     LOGGER.info(f"Fetched {len(pages)} wiki pages total")
     return pages
+
+
+def _get_json(url: str, params: dict, retries: int = 1):
+    """GET with retries. related_tag.json intermittently 500s on large series."""
+    last = None
+    for attempt in range(retries):
+        try:
+            resp = SESSION.get(url, params=params, timeout=30)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            last = e
+            if attempt + 1 < retries:
+                time.sleep(2 * (attempt + 1))
+    raise last
+
+
+def resolve_copyright_tag(qualifier: str, example_tag: str | None = None) -> str | None:
+    """Map a target_series entry to the Danbooru copyright tag it refers to.
+
+    These are two different namespaces and they do not always agree. The
+    copyright tag for Honkai Impact 3rd is `honkai_impact_3rd`, but its
+    characters are qualified `elysia_(honkai_impact)` -- and `honkai_impact` is
+    not a tag at all, it returns post_count 0. target_series holds the
+    QUALIFIER, because that is what is matched against character names, so we
+    have to find the copyright tag before we can ask which characters belong
+    to it.
+
+    First try the entry as a copyright tag directly (true for
+    zenless_zone_zero, blue_archive, ...). Failing that, take a known character
+    of the series and ask which copyright it co-occurs with most.
+    """
+    try:
+        found = _get_json(DANBOORU_TAGS_LOOKUP_URL,
+                          {"search[name]": qualifier, "search[category]": CATEGORY_COPYRIGHT})
+        if found and found[0].get("post_count", 0) > 0:
+            return found[0]["name"]
+    except Exception as e:
+        LOGGER.debug("Copyright lookup for %s failed: %s", qualifier, e)
+
+    if not example_tag:
+        return None
+    try:
+        data = _get_json(DANBOORU_RELATED_URL,
+                         {"query": example_tag, "category": CATEGORY_COPYRIGHT, "limit": 5},
+                         retries=RELATED_RETRIES)
+    except Exception as e:
+        LOGGER.warning("Could not resolve a copyright tag for %s: %s", qualifier, e)
+        return None
+
+    candidates = []
+    for entry in data.get("related_tags", []):
+        tag = entry.get("tag") or {}
+        if tag.get("category") != CATEGORY_COPYRIGHT:
+            continue
+        candidates.append((tag.get("name", ""), tag.get("post_count", 0),
+                           entry.get("overlap_coefficient") or 0))
+    if not candidates:
+        return None
+
+    strong = [c for c in candidates if c[2] >= COPYRIGHT_MIN_OVERLAP]
+    if strong:
+        # Smallest post count = narrowest tag. honkai_(series) spans 187k posts
+        # across the whole franchise; honkai_impact_3rd spans 53k and is the one
+        # whose cast we actually want.
+        name = min(strong, key=lambda c: c[1])[0]
+    else:
+        name = max(candidates, key=lambda c: c[2])[0]
+
+    LOGGER.info("Resolved target series %s -> copyright tag %s", qualifier, name)
+    return name
+
+
+def fetch_series_characters(copyright_tag: str) -> list[str]:
+    """Character tags WITHOUT a series qualifier that belong to this series.
+
+    Qualified tags are deliberately excluded here: their qualifier already says
+    which series they belong to, build_mapping() handles them, and trusting
+    co-occurrence for them would wrongly pull in crossovers such as
+    wolfie_(fortnite), whose two posts are both Zenless crossovers and so
+    scores an overlap of 1.0.
+    """
+    try:
+        data = _get_json(DANBOORU_RELATED_URL,
+                         {"query": copyright_tag, "category": CATEGORY_CHARACTER,
+                          "limit": RELATED_LIMIT},
+                         retries=RELATED_RETRIES)
+    except Exception as e:
+        LOGGER.warning("Could not fetch characters for %s: %s", copyright_tag, e)
+        return []
+
+    names = []
+    for entry in data.get("related_tags", []):
+        tag = entry.get("tag") or {}
+        name = tag.get("name") or ""
+        if tag.get("category") != CATEGORY_CHARACTER or not name or "(" in name:
+            continue
+        if tag.get("post_count", 0) < UNQUALIFIED_MIN_POSTS:
+            continue
+        if (entry.get("overlap_coefficient") or 0) < UNQUALIFIED_MIN_OVERLAP:
+            continue
+        names.append(name)
+    return names
+
+
+def add_unqualified_characters(mapping, config: Config, tags) -> int:
+    """Second pass: characters whose tag carries no series qualifier."""
+    examples: dict[str, tuple[str, int]] = {}
+    for tag in tags:
+        name = tag.get("name") or ""
+        parts = extract_parentheses(name)
+        if not parts:
+            continue
+        series = parts[-1]
+        if series not in config.target_series:
+            continue
+        # Highest post count makes the most reliable probe for the copyright.
+        count = tag.get("post_count", 0)
+        if series not in examples or count > examples[series][1]:
+            examples[series] = (name, count)
+
+    added = 0
+    for series in sorted(config.target_series):
+        example = examples.get(series, (None, 0))[0]
+        copyright_tag = resolve_copyright_tag(series, example)
+        if not copyright_tag:
+            LOGGER.warning(
+                "Skipping unqualified characters for %s: no copyright tag found. "
+                "Check that it is spelled as Danbooru spells it.", series
+            )
+            continue
+        for name in fetch_series_characters(copyright_tag):
+            if name in config.skip_tags or name in mapping:
+                continue
+            if name in config.manual_overrides:
+                mapping[name] = config.manual_overrides[name]
+            else:
+                mapping[name] = prettify_name(name)
+            added += 1
+        time.sleep(SLEEP_TIME)
+
+    LOGGER.info("Added %d unqualified character mappings", added)
+    return added
 
 
 def extract_parentheses(tag_name: str):
@@ -256,6 +426,11 @@ def generate_character_map(config: Config) -> dict[str, str]:
 
     tags = fetch_all_character_tags()
     mapping = build_mapping(tags, target_series, skip_tags, manual_overrides)
+
+    # build_mapping() can only match tags that carry a "(series)" qualifier.
+    # Danbooru omits it whenever a character's name is already unambiguous, so
+    # on its own the pass above silently drops most of a series' cast.
+    add_unqualified_characters(mapping, config, tags)
 
     aliases = fetch_all_tag_aliases()
     apply_aliases(mapping, aliases, skip_tags)
