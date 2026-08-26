@@ -33,6 +33,19 @@ in `CONFIG_PATH`, editable through the admin UI.
 | `TASK_STATUS_CHANNEL_ID` | no | Channel the scheduled tasks report into. |
 | `MODE` | no | `DEV` loads jishaku. |
 
+### Webhooks are config, not environment
+
+`webhooks.json` maps a forum channel name to a list of **Discord webhook URLs**,
+and `services/posting.py` POSTs to those values directly. Earlier versions read a
+single `WEBHOOK_PROXY` env var instead; the `WEBHOOK_*` environment variables are
+no longer read by anything.
+
+```json
+{
+  "channel-name": ["https://discord.com/api/webhooks/<id>/<token>"]
+}
+```
+
 ### Automatic character pulling is off until you configure it
 
 `cogs/tasks.py` rebuilds `char_map.json` from Danbooru on a 10-day loop, and

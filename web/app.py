@@ -67,7 +67,7 @@ CONFIGS: dict[str, dict] = {
         "file": "webhooks.json",
         "type": "raw",
         "label": "Webhooks",
-        "description": "Channel name → list of webhook env var names for cross-posting.",
+        "description": "Channel name → list of Discord webhook URLs to cross-post to. Full https://discord.com/api/webhooks/... URLs, not env var names.",
         "auto_generated": False,
     },
     "target_series": {
