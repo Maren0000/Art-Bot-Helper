@@ -113,6 +113,13 @@ implements the classic `/build` endpoint, not BuildKit — hence
 `--mount=type=cache`, and `--mount=type=secret`; the classic builder cannot parse
 them and the build fails.
 
-`pyjsparser` (via `Js2Py_3.13`) publishes only a `py2-none-any` wheel, so pip
-builds it from its pure-Python sdist. That needs network during build but no
-compiler, which is why the image installs no build toolchain.
+There is no separate `check` job. `actions/setup-python` cannot run on this
+runner — it has no local tool cache and the version manifest is unreachable, so
+it fails with *"The version '3.13' with architecture 'x64' was not found"*. The
+syntax gate is a `compileall` step inside the Dockerfile instead: a SyntaxError
+fails the build, so nothing is pushed and nothing is deployed. That also runs it
+against the exact interpreter the container will use.
+
+Every remaining pin ships a cp313 manylinux x86_64 wheel, so the image installs
+no build toolchain. If you add a dependency without a wheel, install
+`build-essential` in the **builder** stage only — never in the runtime stage.

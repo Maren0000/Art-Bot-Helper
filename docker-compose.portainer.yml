@@ -62,7 +62,10 @@ services:
     healthcheck:
       # /healthz is the one unauthenticated route; every other page redirects to
       # /login, which would still return 200 and hide a broken app.
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/healthz"]
+      # Uses python, not curl -- the image ships no apt packages at all, and
+      # urlopen raises on any non-2xx so the exit code is already correct.
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys;urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=3).read();sys.exit(0)"]
       interval: 30s
       timeout: 5s
       retries: 3

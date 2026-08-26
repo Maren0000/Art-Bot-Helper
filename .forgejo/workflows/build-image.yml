@@ -22,6 +22,11 @@
 # The engine behind the socket is rootful Podman via its Docker-compatible API -
 # hence DOCKER_BUILDKIT=0, since that API implements the classic /build endpoint
 # and not BuildKit. Keep the Dockerfile free of heredocs and --mount flags.
+#
+# There is no separate `check` job: actions/setup-python cannot run here (the
+# runner has no local tool cache and the version manifest is unreachable), so
+# the syntax gate is a `compileall` RUN inside the Dockerfile. A SyntaxError
+# fails the build, which means nothing is pushed and nothing is deployed.
 
 name: build-image
 
@@ -37,25 +42,10 @@ env:
   DOCKER_CLI_VERSION: "27.5.1"
 
 jobs:
-  # A syntax error in a cog is not caught until discord.py tries to load the
-  # extension at runtime, where it is swallowed into a log line and the bot
-  # keeps running without that command. Compiling every module here turns that
-  # into a red pipeline before an image is pushed.
-  check:
-    runs-on: linux-amd64
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - name: Byte-compile every module
-        run: python -m compileall -q cogs db services utils web main.py config.py exception.py view.py
-
   build:
     # This is the runner's LABEL, not its name - `miku-pve` is the name and
     # matches nothing, leaving the job queued forever.
     runs-on: linux-amd64
-    needs: check
     steps:
       - uses: actions/checkout@v4
 
