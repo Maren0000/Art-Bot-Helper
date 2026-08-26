@@ -32,6 +32,59 @@ in `CONFIG_PATH`, editable through the admin UI.
 | `BLUESKY_IDENTIFIER` / `BLUESKY_APP_PASSWORD` | no | Bluesky support is skipped when either is blank. |
 | `TASK_STATUS_CHANNEL_ID` | no | Channel the scheduled tasks report into. |
 | `MODE` | no | `DEV` loads jishaku. |
+| `WEB_COOKIE_SECURE` | no | `auto` (follow request scheme), `1`, or `0`. |
+| `WEB_FORWARDED_ALLOW_IPS` | no | Proxies whose `X-Forwarded-*` headers are trusted. Default `*`. |
+| `OIDC_*` | no | Single sign-on for the admin UI — see below. |
+
+### OIDC single sign-on (optional)
+
+The admin UI can authenticate against any OpenID Connect provider using the
+Authorization Code flow with PKCE. It is **inert unless `OIDC_ISSUER`,
+`OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` are all set**, so existing
+deployments are unaffected.
+
+The userscript API (`web/api.py`) keeps its own bearer-token auth and is
+deliberately untouched — a userscript cannot perform a browser redirect.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `OIDC_ISSUER` | — | Base URL. `/.well-known/openid-configuration` is discovered from it. |
+| `OIDC_CLIENT_ID` | — | |
+| `OIDC_CLIENT_SECRET` | — | |
+| `OIDC_REDIRECT_URL` | derived | `https://<host>/auth/oidc/callback`. Set it explicitly. |
+| `OIDC_PROVIDER_NAME` | `SSO` | Button label on the login page. |
+| `OIDC_SCOPES` | `openid profile email` | Add your groups scope if the provider needs one. |
+| `OIDC_ALLOWED_GROUPS` | — | Comma-separated. Case-insensitive. |
+| `OIDC_ALLOWED_EMAILS` | — | Comma-separated. |
+| `OIDC_ALLOWED_SUBS` | — | Comma-separated subject IDs. |
+| `OIDC_GROUPS_CLAIM` | `groups` | Claim to read groups from. |
+| `OIDC_USERNAME_CLAIM` | `preferred_username` | Falls back to `email`, then `sub`. |
+| `OIDC_DISABLE_PASSWORD_LOGIN` | `0` | Turn on only after SSO works. |
+
+**Restrict who can log in.** If `OIDC_ALLOWED_GROUPS`, `OIDC_ALLOWED_EMAILS`
+and `OIDC_ALLOWED_SUBS` are all empty, *any* account your provider will
+authenticate becomes a full admin of this panel. That is fine when the provider
+only issues tokens to an application you have already restricted; it is
+dangerous with a public IdP. A warning is logged at startup when no allow-list
+is set.
+
+Password login stays enabled alongside SSO so a provider outage cannot lock you
+out. Set `OIDC_DISABLE_PASSWORD_LOGIN=1` once SSO is confirmed working — doing
+so also invalidates any session that was issued via password.
+
+Notes on the implementation:
+
+- Claims come from the `userinfo` endpoint, so no ID token signature
+  verification, no JWKS handling, and no new dependency. If a provider
+  advertises no `userinfo` endpoint, the ID token's claims are read instead and
+  `iss` / `aud` / `exp` / `nonce` are validated — permitted by OIDC Core 3.1.3.7
+  because that token came straight from the token endpoint over TLS.
+- CSRF `state`, the PKCE verifier and the post-login target live in a
+  short-lived HMAC-signed cookie scoped to `/auth/oidc`. There is no
+  server-side session store, so a restart does not break in-flight logins.
+- Behind a reverse proxy, uvicorn runs with `proxy_headers` enabled so
+  `request.url.scheme` is correct; otherwise cookies would never be marked
+  `Secure` and a derived `redirect_uri` would come out as `http://`.
 
 ### Webhooks are config, not environment
 

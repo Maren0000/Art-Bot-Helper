@@ -72,6 +72,17 @@ Then set the environment variables:
 | `ABH_TAG` | no | Pin a commit sha; unset tracks `:latest` |
 | `ABH_BSKY_ID` / `ABH_BSKY_PASS` | no | Bluesky; skipped when blank |
 | `ABH_TASK_CHANNEL_ID` | no | Channel for scheduled-task reports |
+| `ABH_OIDC_ISSUER` | no | Enables SSO when set with the two below |
+| `ABH_OIDC_CLIENT_ID` | no | |
+| `ABH_OIDC_CLIENT_SECRET` | no | |
+| `ABH_OIDC_REDIRECT_URL` | with SSO | `https://<public-host>/auth/oidc/callback`, exactly as registered |
+| `ABH_OIDC_ALLOWED_GROUPS` | with SSO | Otherwise any provider user becomes an admin |
+
+For SSO, register the redirect URI at your provider as
+`https://<public-host>/auth/oidc/callback` and set `ABH_OIDC_REDIRECT_URL` to the
+same string — a mismatch is the usual cause of `redirect_uri_mismatch`. Leave
+`ABH_OIDC_DISABLE_PASSWORD_LOGIN` at `0` until a real SSO login has succeeded.
+See the README for the full variable list.
 
 Deploy. The first deploy pulls `:latest`, which only exists after the first
 successful CI run — push to `main` (or run the workflow manually) first.

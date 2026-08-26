@@ -95,7 +95,11 @@
              style="background: linear-gradient(90deg, #00bed4, #4d0094, #00bed4)"></div>
 
         <h1 class="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1">Sign in ✦</h1>
-        <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">Enter your credentials to continue.</p>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
+            {% if password_enabled %}Enter your credentials to continue.
+            {% elif oidc_enabled %}Continue with {{ oidc_provider }} to sign in.
+            {% else %}Login is not configured.{% endif %}
+        </p>
 
         {% if no_password %}
         <div class="flex items-start gap-3 px-4 py-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/40 mb-6">
@@ -103,9 +107,12 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
             </svg>
             <p class="text-sm text-amber-700 dark:text-amber-300">
-                <span class="font-bold">No password set.</span>
-                Add <code class="font-mono text-xs bg-amber-100 dark:bg-amber-900/40 px-1 py-0.5 rounded">ADMIN_PASSWORD</code>
-                to your <code class="font-mono text-xs bg-amber-100 dark:bg-amber-900/40 px-1 py-0.5 rounded">.env</code> to enable login.
+                <span class="font-bold">No login method configured.</span>
+                Set <code class="font-mono text-xs bg-amber-100 dark:bg-amber-900/40 px-1 py-0.5 rounded">ADMIN_PASSWORD</code>,
+                or configure OIDC with
+                <code class="font-mono text-xs bg-amber-100 dark:bg-amber-900/40 px-1 py-0.5 rounded">OIDC_ISSUER</code>,
+                <code class="font-mono text-xs bg-amber-100 dark:bg-amber-900/40 px-1 py-0.5 rounded">OIDC_CLIENT_ID</code> and
+                <code class="font-mono text-xs bg-amber-100 dark:bg-amber-900/40 px-1 py-0.5 rounded">OIDC_CLIENT_SECRET</code>.
             </p>
         </div>
         {% endif %}
@@ -119,7 +126,34 @@
         </div>
         {% endif %}
 
-        <form method="post" action="/login" class="space-y-4" {% if no_password %}style="pointer-events:none;opacity:0.5"{% endif %}>
+        {% if oidc_enabled %}
+        <a href="/auth/oidc/login?next={{ next | urlencode }}"
+           class="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-bold rounded-xl
+                  border border-gray-200 dark:border-gray-700
+                  bg-white dark:bg-gray-800
+                  text-gray-700 dark:text-gray-200
+                  hover:border-cyan-400 dark:hover:border-cyan-500 transition-colors
+                  focus:outline-none focus:ring-2 focus:ring-cyan-400">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M12 11c0-1.105.895-2 2-2h1a4 4 0 100-8 4 4 0 00-4 4v6zm0 0v6a4 4 0 01-4 4 4 4 0 010-8h1a2 2 0 002-2z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M15 7a2 2 0 11-4 0 2 2 0 014 0z"/>
+            </svg>
+            Continue with {{ oidc_provider }}
+        </a>
+        {% endif %}
+
+        {% if oidc_enabled and password_enabled %}
+        <div class="flex items-center gap-3 my-5">
+            <div class="h-px flex-1 bg-gray-200 dark:bg-gray-700"></div>
+            <span class="text-xs uppercase tracking-widest text-gray-400 dark:text-gray-500">or</span>
+            <div class="h-px flex-1 bg-gray-200 dark:bg-gray-700"></div>
+        </div>
+        {% endif %}
+
+        {% if password_enabled %}
+        <form method="post" action="/login" class="space-y-4">
             <input type="hidden" name="next" value="{{ next }}">
 
             <div>
@@ -164,6 +198,7 @@
                 Sign in
             </button>
         </form>
+        {% endif %}
     </div>
 
     <!-- Theme toggle -->

@@ -50,6 +50,26 @@ services:
       # unset it silently falls back to TOKEN; set it explicitly so rotating
       # the bot token does not invalidate every issued userscript token.
       - WEB_SECRET=${ABH_WEB_SECRET}
+      # --- OIDC single sign-on for the admin UI (optional) ---------------
+      # Inert unless ISSUER, CLIENT_ID and CLIENT_SECRET are ALL set. The
+      # userscript API keeps its own bearer-token auth and is unaffected.
+      - OIDC_ISSUER=${ABH_OIDC_ISSUER:-}
+      - OIDC_CLIENT_ID=${ABH_OIDC_CLIENT_ID:-}
+      - OIDC_CLIENT_SECRET=${ABH_OIDC_CLIENT_SECRET:-}
+      # Must EXACTLY match the redirect URI registered at the provider, and
+      # must be the externally reachable URL, not the container's.
+      - OIDC_REDIRECT_URL=${ABH_OIDC_REDIRECT_URL:-}
+      - OIDC_PROVIDER_NAME=${ABH_OIDC_PROVIDER_NAME:-SSO}
+      - OIDC_SCOPES=${ABH_OIDC_SCOPES:-openid profile email}
+      # WHO may log in. With none of these set, ANY user the provider
+      # authenticates becomes a full admin -- restrict here or at the provider.
+      - OIDC_ALLOWED_GROUPS=${ABH_OIDC_ALLOWED_GROUPS:-}
+      - OIDC_ALLOWED_EMAILS=${ABH_OIDC_ALLOWED_EMAILS:-}
+      - OIDC_ALLOWED_SUBS=${ABH_OIDC_ALLOWED_SUBS:-}
+      - OIDC_GROUPS_CLAIM=${ABH_OIDC_GROUPS_CLAIM:-groups}
+      - OIDC_USERNAME_CLAIM=${ABH_OIDC_USERNAME_CLAIM:-preferred_username}
+      # Set to 1 only AFTER a successful SSO login, or you can lock yourself out.
+      - OIDC_DISABLE_PASSWORD_LOGIN=${ABH_OIDC_DISABLE_PASSWORD_LOGIN:-0}
       # Pixiv PHPSESSID cookie - without it Pixiv fetches return 403.
       - PIXIV_COOKIE=${ABH_PIXIV_COOKIE}
       # Hugging Face token for the cl_tagger spaces used by ML tagging.

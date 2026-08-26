@@ -112,6 +112,15 @@ async def run_combined() -> None:
         host=os.getenv("WEB_HOST", "127.0.0.1"),
         port=int(os.getenv("WEB_PORT", "8000")),
         log_level="warning",
+        # Behind a reverse proxy every request arrives as plain http from the
+        # proxy's address. Without these, request.url.scheme is always "http",
+        # so session cookies would never be marked Secure and a derived OIDC
+        # redirect_uri would come out as http:// and be rejected by the
+        # provider. Set WEB_FORWARDED_ALLOW_IPS to the proxy's address to be
+        # stricter than the default; container IPs are usually dynamic, which
+        # is why "*" is the default.
+        proxy_headers=True,
+        forwarded_allow_ips=os.getenv("WEB_FORWARDED_ALLOW_IPS", "*"),
     )
     web_server = uvicorn.Server(web_config)
     # Let asyncio handle SIGINT/SIGTERM rather than uvicorn installing its own handlers.

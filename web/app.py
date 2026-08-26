@@ -1,5 +1,7 @@
+import base64
 import hashlib
 import hmac
+import logging
 import json
 import os
 import secrets
@@ -18,6 +20,7 @@ from tortoise.functions import Count
 # Allow importing db.models when running standalone (outside the project root).
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.models import Image  # noqa: E402
+from web.oidc import OIDCClient, OIDCError, OIDCSettings, TX_COOKIE, TX_TTL  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -39,6 +42,21 @@ ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "")
 _raw_key = os.getenv("WEB_SECRET") or os.getenv("TOKEN", "fallback-key")
 SIGNING_KEY: bytes = hashlib.sha256(f"artbot-web:{_raw_key}".encode()).digest()
 COOKIE_NAME = "abadmin_session"
+SESSION_MAX_AGE = 60 * 60 * 24 * 7
+
+LOGGER = logging.getLogger("web.app")
+
+# OIDC is optional; OIDC_SETTINGS.enabled is False unless issuer, client id and
+# client secret are all present. See web/oidc.py.
+OIDC_SETTINGS = OIDCSettings.from_env()
+OIDC_SETTINGS.log_startup_state()
+OIDC_CLIENT = OIDCClient(OIDC_SETTINGS, SIGNING_KEY)
+
+# Secure cookies require HTTPS. "auto" follows the request scheme, which is only
+# accurate because main.py runs uvicorn with proxy_headers enabled -- otherwise
+# every request behind the reverse proxy looks like plain http and the session
+# cookie would never be marked secure.
+_COOKIE_SECURE = os.getenv("WEB_COOKIE_SECURE", "auto").strip().lower()
 
 # Only files actually loaded by config.py / the bot.
 CONFIGS: dict[str, dict] = {
@@ -178,12 +196,68 @@ templates.env.globals["build_page_url"] = build_page_url
 # ---------------------------------------------------------------------------
 
 
-def make_session_token(username: str) -> str:
-    return hmac.new(SIGNING_KEY, username.encode(), digestmod=hashlib.sha256).hexdigest()
+def cookie_secure(request: Request) -> bool:
+    if _COOKIE_SECURE in ("1", "true", "yes", "on"):
+        return True
+    if _COOKIE_SECURE in ("0", "false", "no", "off"):
+        return False
+    return request.url.scheme == "https"
+
+
+def make_session_token(username: str, method: str = "password") -> str:
+    """Sign an identity into the session cookie.
+
+    The cookie now carries WHO logged in and HOW, rather than being a single
+    fixed HMAC of ADMIN_USERNAME. OIDC users have no shared secret to compare
+    against, and recording the method lets OIDC_DISABLE_PASSWORD_LOGIN revoke
+    password sessions that were issued before it was turned on.
+    """
+    payload = json.dumps({"u": username, "m": method}, separators=(",", ":"))
+    raw = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+    sig = hmac.new(SIGNING_KEY, raw.encode(), digestmod=hashlib.sha256).hexdigest()
+    return f"{raw}.{sig}"
+
+
+def read_session(token: str | None) -> dict | None:
+    """Return the session payload if the signature checks out, else None."""
+    if not token or "." not in token:
+        return None
+    raw, _, sig = token.rpartition(".")
+    expected = hmac.new(SIGNING_KEY, raw.encode(), digestmod=hashlib.sha256).hexdigest()
+    if not secrets.compare_digest(sig, expected):
+        return None
+    try:
+        data = json.loads(base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
+    except Exception:
+        return None
+    if not isinstance(data, dict) or not data.get("u"):
+        return None
+    return data
+
+
+def password_login_enabled() -> bool:
+    return bool(ADMIN_PASSWORD) and not OIDC_SETTINGS.disable_password_login
+
+
+def any_login_enabled() -> bool:
+    return password_login_enabled() or OIDC_SETTINGS.enabled
+
+
+def session_user(token: str | None) -> str | None:
+    """The logged-in username, or None if the cookie is absent or unusable."""
+    data = read_session(token)
+    if not data:
+        return None
+    if data.get("m") == "password" and not password_login_enabled():
+        # Password login was switched off after this cookie was minted.
+        return None
+    if data.get("m") == "oidc" and not OIDC_SETTINGS.enabled:
+        return None
+    return str(data["u"])
 
 
 def is_valid_token(token: str) -> bool:
-    return secrets.compare_digest(token, make_session_token(ADMIN_USERNAME))
+    return session_user(token) is not None
 
 
 class NotAuthenticated(Exception):
@@ -197,7 +271,7 @@ async def not_authenticated_handler(request: Request, _: NotAuthenticated) -> Re
 
 
 def require_auth(session: str | None = Cookie(default=None, alias=COOKIE_NAME)) -> None:
-    if not ADMIN_PASSWORD or not session or not is_valid_token(session):
+    if not any_login_enabled() or session_user(session) is None:
         raise NotAuthenticated()
 
 
@@ -247,15 +321,25 @@ def save_config(name: str, data) -> None:
 # ---------------------------------------------------------------------------
 
 
+def login_context(next_url: str, error: str | None = None) -> dict:
+    return {
+        "next": next_url,
+        "error": error,
+        # Legacy flag name kept so the template's existing warning block still
+        # fires: it means "there is no way to log in", not literally "no password".
+        "no_password": not any_login_enabled(),
+        "password_enabled": password_login_enabled(),
+        "oidc_enabled": OIDC_SETTINGS.enabled,
+        "oidc_provider": OIDC_SETTINGS.provider_name,
+    }
+
+
 @app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request, next: str = "/"):
+async def login_page(request: Request, next: str = "/", error: str | None = None):
     session = request.cookies.get(COOKIE_NAME)
-    if session and ADMIN_PASSWORD and is_valid_token(session):
+    if session_user(session) is not None:
         return RedirectResponse(safe_next(next), status_code=303)
-    return templates.TemplateResponse(
-        request, "login.html",
-        {"next": next, "error": None, "no_password": not ADMIN_PASSWORD},
-    )
+    return templates.TemplateResponse(request, "login.html", login_context(next, error))
 
 
 @app.post("/login", response_class=HTMLResponse)
@@ -265,11 +349,9 @@ async def login_submit(
     password: str = Form(),
     next: str = Form(default="/"),
 ):
-    if not ADMIN_PASSWORD:
+    if not password_login_enabled():
         return templates.TemplateResponse(
-            request, "login.html",
-            {"next": next, "error": None, "no_password": True},
-            status_code=503,
+            request, "login.html", login_context(next), status_code=503,
         )
     valid = secrets.compare_digest(username, ADMIN_USERNAME) and secrets.compare_digest(
         password, ADMIN_PASSWORD
@@ -277,13 +359,14 @@ async def login_submit(
     if not valid:
         return templates.TemplateResponse(
             request, "login.html",
-            {"next": next, "error": "Invalid username or password.", "no_password": False},
+            login_context(next, "Invalid username or password."),
             status_code=401,
         )
     response = RedirectResponse(safe_next(next), status_code=303)
     response.set_cookie(
-        COOKIE_NAME, make_session_token(ADMIN_USERNAME),
-        httponly=True, samesite="lax", max_age=60 * 60 * 24 * 7,
+        COOKIE_NAME, make_session_token(ADMIN_USERNAME, "password"),
+        httponly=True, samesite="lax", max_age=SESSION_MAX_AGE,
+        secure=cookie_secure(request),
     )
     return response
 
@@ -292,6 +375,90 @@ async def login_submit(
 async def logout():
     response = RedirectResponse("/login", status_code=303)
     response.delete_cookie(COOKIE_NAME)
+    return response
+
+
+# ---------------------------------------------------------------------------
+# OIDC login (admin UI only -- web/api.py keeps its own bearer-token auth)
+# ---------------------------------------------------------------------------
+
+
+def oidc_redirect_uri(request: Request) -> str:
+    """The callback URL registered with the provider.
+
+    Prefer the explicit OIDC_REDIRECT_URL. Deriving it from the request works
+    only if the reverse proxy forwards Host and X-Forwarded-Proto AND uvicorn
+    trusts them, and a mismatch here is the single most common cause of
+    redirect_uri_mismatch, so being explicit is worth it.
+    """
+    if OIDC_SETTINGS.redirect_url:
+        return OIDC_SETTINGS.redirect_url
+    return str(request.url_for("oidc_callback"))
+
+
+@app.get("/auth/oidc/login")
+async def oidc_login(request: Request, next: str = "/"):
+    if not OIDC_SETTINGS.enabled:
+        return RedirectResponse("/login", status_code=303)
+    try:
+        url, tx = await OIDC_CLIENT.begin(oidc_redirect_uri(request), safe_next(next))
+    except OIDCError as e:
+        LOGGER.error("OIDC login could not start: %s", e)
+        return templates.TemplateResponse(
+            request, "login.html", login_context(next, str(e)), status_code=502,
+        )
+    response = RedirectResponse(url, status_code=303)
+    # Scoped to the callback path so it is not sent with every request, and
+    # short-lived so an abandoned login does not linger.
+    response.set_cookie(
+        TX_COOKIE, tx, httponly=True, samesite="lax", max_age=TX_TTL,
+        path="/auth/oidc", secure=cookie_secure(request),
+    )
+    return response
+
+
+@app.get("/auth/oidc/callback", name="oidc_callback")
+async def oidc_callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    error_description: str | None = None,
+):
+    if not OIDC_SETTINGS.enabled:
+        return RedirectResponse("/login", status_code=303)
+
+    def fail(message: str, status: int = 400):
+        LOGGER.warning("OIDC login failed: %s", message)
+        resp = templates.TemplateResponse(
+            request, "login.html", login_context("/", message), status_code=status,
+        )
+        resp.delete_cookie(TX_COOKIE, path="/auth/oidc")
+        return resp
+
+    if error:
+        # The provider itself refused (access_denied, consent_required, ...).
+        return fail(error_description or f"The identity provider returned: {error}")
+    if not code or not state:
+        return fail("The identity provider did not return an authorization code.")
+
+    try:
+        result = await OIDC_CLIENT.complete(code, state, request.cookies.get(TX_COOKIE))
+        username = OIDC_CLIENT.authorize(result["claims"])
+    except OIDCError as e:
+        return fail(str(e), status=403)
+    except Exception as e:
+        LOGGER.exception("Unexpected error completing OIDC login")
+        return fail(f"Unexpected error completing login ({e}).", status=500)
+
+    LOGGER.info("OIDC login succeeded for %s", username)
+    response = RedirectResponse(safe_next(result.get("next", "/")), status_code=303)
+    response.set_cookie(
+        COOKIE_NAME, make_session_token(username, "oidc"),
+        httponly=True, samesite="lax", max_age=SESSION_MAX_AGE,
+        secure=cookie_secure(request),
+    )
+    response.delete_cookie(TX_COOKIE, path="/auth/oidc")
     return response
 
 
