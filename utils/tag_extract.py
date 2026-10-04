@@ -6,6 +6,8 @@ import time
 from pathlib import Path
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from config import Config
 
@@ -22,8 +24,24 @@ CATEGORY_CHARACTER = 4
 
 USER_AGENT = "Art-Bot-Helper/1.0"
 
+# Danbooru intermittently answers 500/502/503 under load, and a full rebuild
+# makes hundreds of paginated requests, so a single transient failure used to
+# throw away the whole run. Retry those (and dropped connections / read
+# timeouts) with exponential backoff -- 0s, 2s, 4s, 8s, 16s -- honouring
+# Retry-After on 429/503. raise_on_status=False hands the final response back
+# so callers' raise_for_status() still reports the real status once retries
+# run out.
+DANBOORU_RETRY = Retry(
+    total=5,
+    backoff_factor=1,
+    status_forcelist=(429, 500, 502, 503, 504),
+    allowed_methods=frozenset({"GET"}),
+    raise_on_status=False,
+)
+
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": USER_AGENT})
+SESSION.mount("https://", HTTPAdapter(max_retries=DANBOORU_RETRY))
 
 FETCH_LIMIT = 1000
 SLEEP_TIME = 0.1
@@ -48,7 +66,6 @@ UNQUALIFIED_MIN_POSTS = 20
 # anything above this as a match and then take the most specific one.
 COPYRIGHT_MIN_OVERLAP = 0.9
 RELATED_LIMIT = 1000
-RELATED_RETRIES = 3
 
 DEFAULT_CONFIG_DIR = Path(
     os.getenv("CONFIG_PATH", str(Path(__file__).resolve().parents[1] / "configs"))
@@ -161,19 +178,10 @@ def fetch_all_wiki_pages():
     return pages
 
 
-def _get_json(url: str, params: dict, retries: int = 1):
-    """GET with retries. related_tag.json intermittently 500s on large series."""
-    last = None
-    for attempt in range(retries):
-        try:
-            resp = SESSION.get(url, params=params, timeout=30)
-            resp.raise_for_status()
-            return resp.json()
-        except Exception as e:
-            last = e
-            if attempt + 1 < retries:
-                time.sleep(2 * (attempt + 1))
-    raise last
+def _get_json(url: str, params: dict):
+    resp = SESSION.get(url, params=params, timeout=30)
+    resp.raise_for_status()
+    return resp.json()
 
 
 def resolve_copyright_tag(qualifier: str, example_tag: str | None = None) -> str | None:
@@ -203,8 +211,7 @@ def resolve_copyright_tag(qualifier: str, example_tag: str | None = None) -> str
         return None
     try:
         data = _get_json(DANBOORU_RELATED_URL,
-                         {"query": example_tag, "category": CATEGORY_COPYRIGHT, "limit": 5},
-                         retries=RELATED_RETRIES)
+                         {"query": example_tag, "category": CATEGORY_COPYRIGHT, "limit": 5})
     except Exception as e:
         LOGGER.warning("Could not resolve a copyright tag for %s: %s", qualifier, e)
         return None
@@ -244,8 +251,7 @@ def fetch_series_characters(copyright_tag: str) -> list[str]:
     try:
         data = _get_json(DANBOORU_RELATED_URL,
                          {"query": copyright_tag, "category": CATEGORY_CHARACTER,
-                          "limit": RELATED_LIMIT},
-                         retries=RELATED_RETRIES)
+                          "limit": RELATED_LIMIT})
     except Exception as e:
         LOGGER.warning("Could not fetch characters for %s: %s", copyright_tag, e)
         return []
