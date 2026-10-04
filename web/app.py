@@ -74,6 +74,13 @@ CONFIGS: dict[str, dict] = {
         "description": "ML tag → series/game name used to match forum channels.",
         "auto_generated": False,
     },
+    "anime_map": {
+        "file": "anime_map.json",
+        "type": "dict",
+        "label": "Anime Map",
+        "description": "ML/Pixiv tag → thread name in the anime-{safety} forums. Ignored when the image also matches the Series Map.",
+        "auto_generated": False,
+    },
     "safety_map": {
         "file": "safety_map.json",
         "type": "dict",
@@ -889,6 +896,7 @@ async def tagger_test(request: Request):
 
     charas = sorted({bot.config.char_map[t] for t in result.characters if t in bot.config.char_map})
     series = next((bot.config.series_map[t] for t in result.copyrights if t in bot.config.series_map), "")
+    anime = sorted({bot.config.anime_map[t] for t in result.copyrights if t in bot.config.anime_map})
     safety = bot.config.safety_map.get(result.rating, "") if result.rating else ""
 
     test_result = {
@@ -901,7 +909,7 @@ async def tagger_test(request: Request):
             cat: [(tag, f"{prob * 100:.1f}") for tag, prob in tags]
             for cat, tags in result.categories.items() if tags
         },
-        "extracted": {"characters": charas, "series": series, "safety": safety},
+        "extracted": {"characters": charas, "series": series, "anime": anime, "safety": safety},
     }
     return templates.TemplateResponse(
         request, "tagger.html", _tagger_ctx({"saved": False, "test_result": test_result}),

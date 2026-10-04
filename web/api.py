@@ -372,7 +372,7 @@ async def api_submit(request: Request):
             raise ApiError(400, "bad_request", f"Unsupported platform: {platform!r}")
 
         try:
-            charas_model, series, safety = await asyncio.wait_for(
+            charas_model, series, safety, anime = await asyncio.wait_for(
                 posting.tags_model_pass(_bot, hq_image, image_name),
                 timeout=DETECTION_TIMEOUT,
             )
@@ -380,12 +380,18 @@ async def api_submit(request: Request):
             raise ApiError(504, "detection_timeout", "Character detection took too long — try again.")
 
         if platform == "pixiv":
-            charas_extra, series_extra = posting.tags_pixiv_pass(_bot.config, post_data)
+            charas_extra, series_extra, anime_extra = posting.tags_pixiv_pass(_bot.config, post_data)
         else:
-            charas_extra, series_extra = posting.tags_text_pass(_bot.config, post_data.get("text", ""))
-        characters = sorted(charas_model | charas_extra)
+            charas_extra, series_extra, anime_extra = posting.tags_text_pass(_bot.config, post_data.get("text", ""))
         if series_extra:
             series = series_extra
+        # "characters" holds the thread names to post to, which for an anime
+        # forum are series names. The field keeps its name so older
+        # userscripts keep working.
+        thread_names, series = posting.resolve_destination(
+            charas_model | charas_extra, series, anime | anime_extra,
+        )
+        characters = sorted(thread_names)
     except ApiError:
         raise
     except Exception as err:
@@ -448,7 +454,7 @@ async def api_confirm(sid: str, request: Request):
             return sub.result
 
         try:
-            threads, _, _ = await posting.find_character_threads(forum, characters)
+            threads = await posting.find_threads(forum, characters)
             sub.hq_image.seek(0)
             img = sub.hq_image.read()
             links_text, post_id = await posting.create_embed_and_send(

@@ -7,8 +7,10 @@ from services.posting import (
     create_embed_and_send,
     error_description as _error_description,
     fetch_and_validate_image,
-    find_character_threads,
     find_forum_by_name,
+    find_threads,
+    is_anime_forum,
+    resolve_destination,
     tags_model_pass,
     tags_pixiv_pass,
 )
@@ -86,9 +88,10 @@ def _build_confirmation_embed(
             timestamp=datetime.datetime.now(),
         )
 
-    chara_desc = characters if characters else "Please enter a character name."
+    anime = selected_forum is not None and is_anime_forum(selected_forum)
+    chara_desc = characters if characters else ("Please enter a series name." if anime else "Please enter a character name.")
     forum_desc = selected_forum.mention if selected_forum else "Please select a forum channel."
-    embed.add_field(name="Characters", value=chara_desc, inline=False)
+    embed.add_field(name="Series" if anime else "Characters", value=chara_desc, inline=False)
     embed.add_field(name="Forum", value=forum_desc, inline=False)
     return embed
 
@@ -145,15 +148,19 @@ class PostingCog(commands.Cog):
             )
 
             # Run ML model for character/series detection (works for all platforms)
-            charas_model, series, safety = await tags_model_pass(self.bot, hq_image, image_name, on_status=update)
-            characters = ",".join(charas_model)
+            charas, series, safety, anime = await tags_model_pass(self.bot, hq_image, image_name, on_status=update)
 
             # For Pixiv, also check Pixiv tags for additional character/series info
             if platform == "pixiv":
-                charas_pixiv, series_pixiv = tags_pixiv_pass(self.bot.config, post_data)
-                characters = ",".join(charas_model | charas_pixiv)
+                charas_pixiv, series_pixiv, anime_pixiv = tags_pixiv_pass(self.bot.config, post_data)
+                charas |= charas_pixiv
+                anime |= anime_pixiv
                 if series_pixiv:
                     series = series_pixiv
+
+            # Anime forums are threaded by series, so their "characters" are series names.
+            thread_names, series = resolve_destination(charas, series, anime)
+            characters = ",".join(thread_names)
 
             # Finding forum channel based on detected series and safety
             selected_forum = find_forum_by_name(ctx.guild, series, safety)
@@ -189,7 +196,7 @@ class PostingCog(commands.Cog):
                 return
 
             try:
-                threads, _, _ = await find_character_threads(selected_forum, characters, on_status=update)
+                threads = await find_threads(selected_forum, characters, on_status=update)
                 hq_image.seek(0)
                 img = hq_image.read()
                 thread_links, post_id = await create_embed_and_send(
@@ -227,7 +234,7 @@ class PostingCog(commands.Cog):
         forum_channel: discord.channel.ForumChannel
             Forum art channel to post in.
         characters: str
-            All Characters in the image. Seperated by commas.
+            All Characters in the image, or the series for anime forums. Seperated by commas.
         link: str
             Pixiv or Twitter link to image.
         image_num: str
@@ -242,7 +249,7 @@ class PostingCog(commands.Cog):
                 self.bot, link, ctx.guild, image_num, on_status=update,
             )
 
-            threads, _, _ = await find_character_threads(forum_channel, characters.strip(), on_status=update)
+            threads = await find_threads(forum_channel, characters.strip(), on_status=update)
 
             img = hq_image.read()
             thread_links, post_id = await create_embed_and_send(
@@ -277,7 +284,7 @@ class PostingCog(commands.Cog):
         embed=discord.Embed(title="How to post using the bot",
                             description=("This bot supports using the newer slash commands (/post)."),
                             color=discord.Color.yellow())
-        embed.add_field(name="/post", value=("Command for posting to gacha channels (and vocaloid)"
+        embed.add_field(name="/post", value=("Command for posting to gacha and anime channels (and vocaloid)"
                         "\nSyntax: `/post {forum_channel} {characters} {link} {image_num}`"
                         "\n`{forum_channel}`: Pick from the available list."
                         "\n`{characters}`: Check \"{characters}\" section."
@@ -285,7 +292,8 @@ class PostingCog(commands.Cog):
                         "\n`{image_num}`: Check \"{image_num}\" section."), inline=False)
         embed.add_field(name="{characters}", value=("List of characters in the image. Case-insensitive."
                         "\nTo include multiple characters, write each name split by commas (Ex: `noa,yuuka`)."
-                        "\nYou don't need to worry about spaces in the character name if you are using slash commands."), inline=False)
+                        "\nYou don't need to worry about spaces in the character name if you are using slash commands."
+                        "\nFor anime forums, write the series thread name instead (Ex: `frieren`)."), inline=False)
         embed.add_field(name="{Link}", value=("Both Twitter and Pixiv links are supported. Be sure to use the ORIGINAL links when posting. Do not edit the domain."
                         "\nThe bot will download and upload the selected image as a new embed if allowed by the server upload limit. Otherwise, an external embed service (like Phixiv) will be used."), inline=False)
         embed.add_field(name="{image_num}", value=("This is an optional argument. Use it for when a post has multiple images and you want to select a specific one."

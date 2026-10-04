@@ -23,7 +23,7 @@ services:
       # to the external hostname.
       - "${ABH_WEB_PORT:-8005}:8000"
     volumes:
-      # Bot config JSONs: char_map, series_map, safety_map, webhooks,
+      # Bot config JSONs: char_map, series_map, anime_map, safety_map, webhooks,
       # target_series, skip_tags, manual_overrides, api/tagger settings.
       # Starts EMPTY on a fresh deploy - upload them via the web UI. Automatic
       # character pulling stays disabled until target_series.json is populated

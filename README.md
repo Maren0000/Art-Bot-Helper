@@ -124,6 +124,30 @@ Resolution deliberately prefers the *narrowest* copyright tag. Elysia scores
 picking the strongest match alone would select the umbrella franchise and pull
 the Star Rail cast into Honkai Impact.
 
+### Anime forums are threaded by series
+
+Gacha forums are named `{series}-{safety}` and hold a thread per character, an
+"All Characters" thread, and group threads. Anime forums are named
+`anime-{safety}` (`anime-art`, `anime-sus`) and hold **one thread per series**
+with no "All Characters" thread. Any forum whose name starts with `anime-` is
+treated this way.
+
+`anime_map.json` maps a tag (Danbooru copyright tag from the tagger, or a Pixiv
+tag such as `葬送のフリーレン`) to the series thread's exact name:
+
+```json
+{
+  "sousou_no_frieren": "Frieren",
+  "葬送のフリーレン": "Frieren"
+}
+```
+
+When an image matches the Series Map, it goes to that gacha forum and the Anime
+Map is ignored. A franchise with both a game and an anime belongs in whichever
+map matches its original media. Characters are not used for anime posts, and a
+missing series thread fails the post just as a missing character thread does.
+Create it with `/thread create post` first.
+
 ### Webhooks are config, not environment
 
 `webhooks.json` maps a forum channel name to a list of **Discord webhook URLs**,

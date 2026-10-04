@@ -94,7 +94,7 @@ the maps will not match anything, and automatic character pulling stays disabled
 by design (see the README). Log into the admin UI on `:8005` and upload or edit:
 
 - `target_series.json` — **required to enable automatic character pulling**
-- `series_map.json`, `safety_map.json`, `webhooks.json`
+- `series_map.json`, `anime_map.json`, `safety_map.json`, `webhooks.json`
 - `skip_tags.json`, `manual_overrides.json` as needed
 
 `char_map.json` is generated from Danbooru once `target_series` is set.

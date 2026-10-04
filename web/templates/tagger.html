@@ -87,6 +87,11 @@
                     <span class="font-medium text-gray-900 dark:text-gray-100">
                         {{ test_result.extracted.series or "none mapped" }}
                     </span></p>
+                <p><span class="text-gray-500 dark:text-gray-400">Anime:</span>
+                    <span class="font-medium text-gray-900 dark:text-gray-100">
+                        {{ test_result.extracted.anime | join(", ") if test_result.extracted.anime else "none mapped" }}
+                        {% if test_result.extracted.anime and test_result.extracted.series %}(ignored: Series wins){% endif %}
+                    </span></p>
                 <p><span class="text-gray-500 dark:text-gray-400">Safety:</span>
                     <span class="font-medium text-gray-900 dark:text-gray-100">
                         {{ test_result.extracted.safety or "none mapped" }}

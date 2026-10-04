@@ -6,6 +6,12 @@ import traceback
 import discord
 from discord.ui.select import BaseSelect
 
+from services.posting import is_anime_forum
+
+
+def _threads_label(forum: discord.ForumChannel | None) -> str:
+    return "Series" if forum is not None and is_anime_forum(forum) else "Characters"
+
 class BaseView(discord.ui.View):
     interaction: discord.Interaction | None = None
     message: discord.Message | None = None
@@ -99,7 +105,8 @@ class AutoPostView(BaseView):
     async def _confirm_check(self, interaction: discord.Interaction):
         if not self.characters:
             await interaction.response.send_message(
-                "Please fill out the characters. Use commas as a delimiter for multiple characters.", ephemeral=True
+                f"Please fill out the {_threads_label(self.selected_forum).lower()}. Use commas as a delimiter for multiple names.",
+                ephemeral=True,
             )
         elif not self.selected_forum:
             await interaction.response.send_message(
@@ -113,10 +120,12 @@ class AutoPostView(BaseView):
         self.selected_forum = await forum_choice.values[0].fetch()
 
         embed = interaction.message.embeds[0]
+        # Switching between gacha and anime forums changes what the first field holds.
+        embed.set_field_at(index=0, name=_threads_label(self.selected_forum), value=embed.fields[0].value, inline=False)
         embed.set_field_at(index=1, name="Forum Overriden", value=self.selected_forum.mention, inline=False)
         await interaction.response.edit_message(embed=embed)
     
-    @discord.ui.button(label="Edit Characters", style=discord.ButtonStyle.grey, emoji="✏️", custom_id="character_edit")
+    @discord.ui.button(label="Edit Characters / Series", style=discord.ButtonStyle.grey, emoji="✏️", custom_id="character_edit")
     async def edit_chara_button(self, interaction: discord.Interaction, button: discord.ui.Button[AutoPostView]) -> None:
         await interaction.response.send_modal(CharaEditModel(self))
     
@@ -160,10 +169,14 @@ class CharaEditModel(BaseModal, title="Character Edit Modal"):
     def __init__(self, view: AutoPostView):
         super().__init__()
         self.view = view  # store reference
+        self.label = _threads_label(view.selected_forum)
+        self.characters.label = self.label
+        noun = "series" if self.label == "Series" else "character"
+        self.characters.placeholder = f"Enter the new {noun} names, separated by commas"
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         self.view.characters = self.characters.value
 
         embed = interaction.message.embeds[0]
-        embed.set_field_at(index=0, name="Characters Overriden", value=self.characters.value, inline=False)
+        embed.set_field_at(index=0, name=f"{self.label} Overriden", value=self.characters.value, inline=False)
         await interaction.response.edit_message(embed=embed)

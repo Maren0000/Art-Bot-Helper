@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Art Bot Helper
 // @namespace    https://github.com/Maren0000/Art-Bot-Helper
-// @version      1.1.0
+// @version      1.1.1
 // @description  Post art from Twitter/X and Pixiv straight into the Discord art forums via Maren's Art Bot.
 // @homepageURL  https://github.com/Maren0000/Art-Bot-Helper
 // @updateURL    https://raw.githubusercontent.com/Maren0000/Art-Bot-Helper/main/userscript/artbot-helper.user.js
@@ -667,7 +667,7 @@
             ` : ''}
             ${item.error && item.error.existing_post ? `<div class="links"><a href="${esc(item.error.existing_post)}" target="_blank">Existing post</a></div>` : ''}
             ${canEdit ? `
-              <label>Characters (comma separated)</label>
+              <label>Characters, or series for anime forums (comma separated)</label>
               <input data-edit="characters" value="${esc(item.edits.characters)}">
               <label>Forum (series - safety level)</label>
               <select data-edit="forumId">
@@ -850,7 +850,7 @@
       if (postBtn) postBtn.addEventListener('click', () => {
         item.edits.characters = el.querySelector('[data-edit="characters"]').value;
         item.edits.forumId = el.querySelector('[data-edit="forumId"]').value;
-        if (!item.edits.characters.trim()) { item.error = { message: 'Enter at least one character.' }; render(); return; }
+        if (!item.edits.characters.trim()) { item.error = { message: 'Enter at least one character or series.' }; render(); return; }
         if (!item.edits.forumId) { item.error = { message: 'Pick a forum channel.' }; render(); return; }
         item.error = null;
         persistQueue();

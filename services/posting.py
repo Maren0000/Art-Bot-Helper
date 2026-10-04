@@ -18,6 +18,10 @@ from base64 import b64encode
 import exception
 from utils import bluesky_get, compute_hashes, detect_platform, imagehash, pixiv_ajax_get
 
+# Anime forums are named anime-{safety} and hold one thread per series, unlike
+# the gacha {series}-{safety} forums which hold one thread per character.
+ANIME_SERIES = "anime"
+
 
 def error_description(error: Exception) -> tuple[str, str | None]:
     """Return (user-facing description, optional python-error-string) for an error."""
@@ -40,7 +44,7 @@ def error_description(error: Exception) -> tuple[str, str | None]:
         return ("You do not have access to the channel you are trying to post to!", None)
     if isinstance(error, exception.ThreadsNotFound):
         return (
-            "Could not find all character threads!\nMissing threads:\n"
+            "Could not find all threads!\nMissing threads:\n"
             + str(error).lstrip("Command raised an exception: str: "),
             None,
         )
@@ -85,7 +89,7 @@ def error_payload(error: Exception) -> tuple[int, str, str]:
     return 500, "internal_error", message
 
 
-async def tags_model_pass(bot, hq_image: io.BytesIO, image_name: str, on_status=None) -> tuple[set, str, str]:
+async def tags_model_pass(bot, hq_image: io.BytesIO, image_name: str, on_status=None) -> tuple[set, str, str, set]:
     """
     Run ML model on image to detect characters, series, and safety rating.
 
@@ -96,7 +100,7 @@ async def tags_model_pass(bot, hq_image: io.BytesIO, image_name: str, on_status=
         on_status: optional async callable(text) for progress updates
 
     Returns:
-        tuple: (characters_set, series_str, safety_str)
+        tuple: (characters_set, series_str, safety_str, anime_threads_set)
     """
     # Reset stream position and read image bytes
     hq_image.seek(0)
@@ -136,31 +140,36 @@ async def tags_model_pass(bot, hq_image: io.BytesIO, image_name: str, on_status=
             series = bot.config.series_map[series_can]
             break
 
+    anime = {bot.config.anime_map[c] for c in result.copyrights if c in bot.config.anime_map}
+
     safety = ""
     if result.rating is not None:
         safety = bot.config.safety_map.get(result.rating, "")
 
-    return charas, series, safety
+    return charas, series, safety, anime
 
 
-def tags_pixiv_pass(config, ajax_resp: dict) -> tuple[set, str]:
+def tags_pixiv_pass(config, ajax_resp: dict) -> tuple[set, str, set]:
     chara_tags = set()
     series = ""
+    anime = set()
     for tag_dict in ajax_resp['body']['tags']['tags']:
         tag = tag_dict['tag']
         if tag in config.char_map:
             chara_tags.add(config.char_map[tag])
         elif tag in config.series_map:
             series = config.series_map[tag]
+        elif tag in config.anime_map:
+            anime.add(config.anime_map[tag])
 
-    return chara_tags, series
+    return chara_tags, series, anime
 
 
 def _normalize_text(text: str) -> str:
     return re.sub(r"[_\s]+", " ", text.lower())
 
 
-def tags_text_pass(config, text: str) -> tuple[set, str]:
+def tags_text_pass(config, text: str) -> tuple[set, str, set]:
     """
     Scan free text (e.g. a tweet body with hashtags) for known character and
     series tags — the twitter analog of tags_pixiv_pass.
@@ -171,8 +180,9 @@ def tags_text_pass(config, text: str) -> tuple[set, str]:
     """
     charas = set()
     series = ""
+    anime = set()
     if not text:
-        return charas, series
+        return charas, series, anime
 
     norm = _normalize_text(text)
 
@@ -191,7 +201,29 @@ def tags_text_pass(config, text: str) -> tuple[set, str]:
             series = name
             break
 
-    return charas, series
+    for tag, name in config.anime_map.items():
+        if key_in_text(tag):
+            anime.add(name)
+
+    return charas, series, anime
+
+
+def resolve_destination(characters: set, series: str, anime: set) -> tuple[set, str]:
+    """Pick the thread names and forum series to post to.
+
+    A gacha series wins over anime: series with both a game and an anime are
+    filed under whichever is the original media, and that call is made by
+    putting the tag in series_map or anime_map. If both still match (a
+    crossover), the gacha forum is the more specific home. The confirm step
+    lets the poster switch forums by hand.
+    """
+    if series or not anime:
+        return characters, series
+    return anime, ANIME_SERIES
+
+
+def is_anime_forum(forum_channel: discord.ForumChannel) -> bool:
+    return forum_channel.name.startswith(f"{ANIME_SERIES}-")
 
 
 def find_forum_by_name(guild: discord.Guild, series: str, safety: str) -> discord.ForumChannel | None:
@@ -392,6 +424,55 @@ async def find_character_threads(forum_channel: discord.ForumChannel, characters
         raise exception.ThreadsNotFound("\n".join(f"- {name}" for name in missing))
 
     return threads, thread_names, group_names
+
+
+async def find_series_threads(forum_channel: discord.ForumChannel, series: str, on_status=None) -> list:
+    """
+    Find the series threads in an anime forum.
+
+    Anime forums have one thread per series and no "All Characters" or group
+    threads, so this is a plain name lookup.
+
+    Raises:
+        ThreadsNotFound: If any series thread is missing
+    """
+    wanted = list(dict.fromkeys(
+        name.strip() for name in series.lower().replace("_", " ").split(",") if name.strip()
+    ))
+    found = {}
+
+    def process_thread(thread):
+        key = thread.name.lower()
+        if key in wanted and key not in found:
+            found[key] = thread
+
+    if on_status:
+        await on_status(f"🔎 Searching {forum_channel.name} for series threads...")
+
+    for thread in forum_channel.threads:
+        process_thread(thread)
+
+    if len(found) != len(wanted):
+        if on_status:
+            await on_status(f"📂 Searching archived threads in {forum_channel.name}...")
+        async for thread in forum_channel.archived_threads():
+            process_thread(thread)
+            if len(found) == len(wanted):
+                break
+
+    missing = [name for name in wanted if name not in found]
+    if missing:
+        raise exception.ThreadsNotFound("\n".join(f"- {name}" for name in missing))
+
+    return [found[name] for name in wanted]
+
+
+async def find_threads(forum_channel: discord.ForumChannel, names: str, on_status=None) -> list:
+    """Find the threads to post to: series threads in anime forums, character threads otherwise."""
+    if is_anime_forum(forum_channel):
+        return await find_series_threads(forum_channel, names, on_status=on_status)
+    threads, _, _ = await find_character_threads(forum_channel, names, on_status=on_status)
+    return threads
 
 
 async def store_image_hash(bot, hashes: dict, link: str, platform: str, guild_id: int, thread_id: int, message_id: int):
