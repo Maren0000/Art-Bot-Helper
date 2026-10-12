@@ -5,8 +5,6 @@
 
 {% block content %}
 
-{# Single-entry add forms: the only form for auto-generated configs, and the
-   no-JavaScript fallback for the multi-add form everywhere else. #}
 {% macro single_entry_form() %}
     <form method="post" action="/configs/{{ config_name }}/add" class="flex flex-wrap items-end gap-3">
         <div class="flex-1 min-w-40">
@@ -96,10 +94,11 @@
 {# ================================================================ #}
 {% if config_meta.type == "dict" %}
 
+{% if not config_meta.auto_generated %}
 <!-- Add entry form -->
 <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700/60 px-5 py-4 mb-4">
     <div class="flex items-center justify-between mb-3">
-        <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ "Add Entry" if config_meta.auto_generated else "Add Entries" }}</p>
+        <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Add Entries</p>
         <button type="button" id="bulkImportBtn"
                 class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors
                        text-cyan-700 dark:text-cyan-300 bg-cyan-50 dark:bg-cyan-900/30
@@ -111,9 +110,6 @@
             Bulk import JSON
         </button>
     </div>
-    {% if config_meta.auto_generated %}
-    {{ single_entry_form() }}
-    {% else %}
     <noscript>
     {{ single_entry_form() }}
     </noscript>
@@ -123,6 +119,7 @@
             <kbd class="px-1 rounded bg-gray-100 dark:bg-gray-700 font-mono">,</kbd> to add it. Paste a list to add many at once.
             Every tag in a row gets that row's value.
         </p>
+        <datalist id="multiValues"></datalist>
         <div id="multiRows" class="grid grid-cols-[1fr_14rem_2rem] gap-x-3 gap-y-2 items-start">
             <div class="text-xs text-gray-500 dark:text-gray-400">Keys (tags)</div>
             <div class="text-xs text-gray-500 dark:text-gray-400">Value</div>
@@ -155,8 +152,8 @@
             </div>
         </div>
     </div>
-    {% endif %}
 </div>
+{% endif %}
 
 <!-- Search row -->
 <div class="mb-3">
@@ -304,12 +301,10 @@
 {# ================================================================ #}
 {% elif config_meta.type == "list" %}
 
+{% if not config_meta.auto_generated %}
 <!-- Add item form -->
 <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700/60 px-5 py-4 mb-4">
-    <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">{{ "Add Item" if config_meta.auto_generated else "Add Items" }}</p>
-    {% if config_meta.auto_generated %}
-    {{ single_item_form() }}
-    {% else %}
+    <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Add Items</p>
     <noscript>
     {{ single_item_form() }}
     </noscript>
@@ -331,8 +326,8 @@
             <span id="multiStatus" class="hidden"></span>
         </div>
     </div>
-    {% endif %}
 </div>
+{% endif %}
 
 <!-- Search -->
 <div class="mb-3">
@@ -483,6 +478,7 @@
     </div>
 </dialog>
 
+{% if not config_meta.auto_generated %}
 <!-- Bulk import modal -->
 <dialog id="bulkDialog" class="rounded-2xl shadow-2xl border-0 p-0 w-full max-w-2xl bg-white dark:bg-gray-800">
     <div class="p-6">
@@ -568,6 +564,7 @@
         </div>
     </div>
 </dialog>
+{% endif %}
 {% endif %}
 
 <!-- Delete confirmation modal (dict + list) -->
@@ -676,9 +673,6 @@
 
     var bulkDialog = document.getElementById('bulkDialog');
 
-    // --- Multi-add form (dict + list, hidden for auto-generated configs) ----
-    // Tags become chips; each chip is checked against the full file, which the
-    // page embeds as #cfgExisting inside the live-refreshed region.
     var multiAdd = null;
     var multiEl = document.getElementById('multiAdd');
     if (multiEl) {
@@ -706,6 +700,20 @@
         function existing() {
             var el = document.getElementById('cfgExisting');
             return el ? JSON.parse(el.textContent) : (isDict ? {} : []);
+        }
+
+        function refreshSuggestions() {
+            var list = document.getElementById('multiValues');
+            if (!list) return;
+            var current = existing();
+            list.innerHTML = '';
+            Array.from(new Set(Object.keys(current).map(function (k) { return String(current[k]); })))
+                .sort(function (a, b) { return a.localeCompare(b); })
+                .forEach(function (v) {
+                    var opt = document.createElement('option');
+                    opt.value = v;
+                    list.appendChild(opt);
+                });
         }
 
         function splitTags(text) {
@@ -756,6 +764,8 @@
                 row.value = document.createElement('input');
                 row.value.type = 'text';
                 row.value.placeholder = 'e.g. Hu Tao';
+                row.value.setAttribute('list', 'multiValues');
+                row.value.autocomplete = 'off';
                 row.value.className = 'w-full px-3 py-2 text-sm rounded-lg transition-colors ' +
                     'border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 ' +
                     'placeholder-gray-400 dark:placeholder-gray-500 focus:bg-white dark:focus:bg-gray-700 ' +
@@ -786,7 +796,6 @@
             if (tags.length) { row.keys.push.apply(row.keys, tags); render(); }
         }
 
-        // Classify every chip and return what a save would write.
         function classify() {
             var current = existing();
             var currentSet = isDict ? null : new Set(current);
@@ -920,8 +929,6 @@
                 return;
             }
 
-            // Dict: same preview/apply endpoints as Bulk import JSON. New keys
-            // are written straight away; any overwrite goes through its review.
             var obj = {};
             result.out.forEach(function (o) { obj[o.key] = o.value; });
             var content = JSON.stringify(obj);
@@ -946,9 +953,9 @@
         var clearBtn = document.getElementById('multiClear');
         if (clearBtn) clearBtn.addEventListener('click', function () { hideStatus(); reset(); });
         if (bulkDialog) bulkDialog.addEventListener('close', function () { multiAdd.pending = false; });
-        // Edits, deletes and saves re-render #cfgExisting; re-check the chips against it.
-        document.addEventListener('cfg:refreshed', render);
+        document.addEventListener('cfg:refreshed', function () { refreshSuggestions(); render(); });
 
+        refreshSuggestions();
         makeRow();
         render();
     }
@@ -1059,7 +1066,6 @@
             previewStep.classList.remove('hidden');
         }
 
-        // Lets the multi-add form hand its entries to the review step.
         var bulkTitle = document.getElementById('bulkTitle');
         bulkDialog.review = function (content, data) {
             bulkTitle.textContent = 'Confirm overwrites';
@@ -1074,7 +1080,6 @@
             bulkDialog.showModal();
         });
         document.getElementById('bulkBackBtn').addEventListener('click', function () {
-            // From the multi-add form there is no JSON step to go back to.
             if (multiAdd && multiAdd.pending) bulkDialog.close();
             else resetBulk();
         });

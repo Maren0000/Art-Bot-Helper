@@ -567,9 +567,6 @@ async def delete_image(image_id: int, request: Request):
 
 
 def _multi_add_data(meta: dict, data):
-    """The whole file, embedded in the page so the multi-add form can flag
-    existing keys as you type. Auto-generated maps (char_map) keep the
-    single-entry form: they are large and edits are overwritten anyway."""
     return None if meta.get("auto_generated") else data
 
 
@@ -661,7 +658,6 @@ async def config_add(name: str, key: str = Form(""), value: str = Form(""), item
 
 @app.post("/configs/{name}/add-items", dependencies=[Depends(require_auth)])
 async def config_add_items(request: Request, name: str):
-    """Append several items to a list config at once; existing ones are skipped."""
     if name not in CONFIGS or CONFIGS[name]["type"] != "list" or name in SETTINGS_FILES:
         raise HTTPException(status_code=404)
     form = await request.form()
