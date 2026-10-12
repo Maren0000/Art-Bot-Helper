@@ -5,6 +5,57 @@
 
 {% block content %}
 
+{# Single-entry add forms: the only form for auto-generated configs, and the
+   no-JavaScript fallback for the multi-add form everywhere else. #}
+{% macro single_entry_form() %}
+    <form method="post" action="/configs/{{ config_name }}/add" class="flex flex-wrap items-end gap-3">
+        <div class="flex-1 min-w-40">
+            <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Key (tag)</label>
+            <input type="text" name="key" required placeholder="e.g. hu_tao_(genshin_impact)"
+                   class="w-full px-3 py-2 text-sm rounded-lg transition-colors font-mono
+                          border border-gray-200 dark:border-gray-600
+                          bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100
+                          placeholder-gray-400 dark:placeholder-gray-500
+                          focus:bg-white dark:focus:bg-gray-700
+                          focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent">
+        </div>
+        <div class="flex-1 min-w-40">
+            <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Value</label>
+            <input type="text" name="value" required placeholder="e.g. Hu Tao"
+                   class="w-full px-3 py-2 text-sm rounded-lg transition-colors
+                          border border-gray-200 dark:border-gray-600
+                          bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100
+                          placeholder-gray-400 dark:placeholder-gray-500
+                          focus:bg-white dark:focus:bg-gray-700
+                          focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent">
+        </div>
+        <button type="submit"
+                class="px-4 py-2 text-sm font-bold text-white rounded-xl transition-all"
+                style="background: linear-gradient(135deg, #00bed4, #4d0094)">
+            Add
+        </button>
+    </form>
+{% endmacro %}
+{% macro single_item_form() %}
+    <form method="post" action="/configs/{{ config_name }}/add" class="flex items-end gap-3">
+        <div class="flex-1">
+            <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Value</label>
+            <input type="text" name="item" required placeholder="e.g. genshin_impact"
+                   class="w-full px-3 py-2 text-sm rounded-lg transition-colors font-mono
+                          border border-gray-200 dark:border-gray-600
+                          bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100
+                          placeholder-gray-400 dark:placeholder-gray-500
+                          focus:bg-white dark:focus:bg-gray-700
+                          focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent">
+        </div>
+        <button type="submit"
+                class="px-4 py-2 text-sm font-bold text-white rounded-xl transition-all"
+                style="background: linear-gradient(135deg, #00bed4, #4d0094)">
+            Add
+        </button>
+    </form>
+{% endmacro %}
+
 <!-- Breadcrumb + meta -->
 <div class="flex items-center gap-2 text-sm mb-1">
     <a href="/configs" class="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">Config Maps</a>
@@ -48,7 +99,7 @@
 <!-- Add entry form -->
 <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700/60 px-5 py-4 mb-4">
     <div class="flex items-center justify-between mb-3">
-        <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Add Entry</p>
+        <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ "Add Entry" if config_meta.auto_generated else "Add Entries" }}</p>
         <button type="button" id="bulkImportBtn"
                 class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors
                        text-cyan-700 dark:text-cyan-300 bg-cyan-50 dark:bg-cyan-900/30
@@ -60,33 +111,51 @@
             Bulk import JSON
         </button>
     </div>
-    <form method="post" action="/configs/{{ config_name }}/add" class="flex flex-wrap items-end gap-3">
-        <div class="flex-1 min-w-40">
-            <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Key (tag)</label>
-            <input type="text" name="key" required placeholder="e.g. hu_tao_(genshin_impact)"
-                   class="w-full px-3 py-2 text-sm rounded-lg transition-colors font-mono
-                          border border-gray-200 dark:border-gray-600
-                          bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100
-                          placeholder-gray-400 dark:placeholder-gray-500
-                          focus:bg-white dark:focus:bg-gray-700
-                          focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent">
+    {% if config_meta.auto_generated %}
+    {{ single_entry_form() }}
+    {% else %}
+    <noscript>
+    {{ single_entry_form() }}
+    </noscript>
+    <div id="multiAdd" class="hidden">
+        <p class="text-xs text-gray-400 dark:text-gray-500 mb-3">
+            Type a tag and press <kbd class="px-1 rounded bg-gray-100 dark:bg-gray-700 font-mono">Enter</kbd> or
+            <kbd class="px-1 rounded bg-gray-100 dark:bg-gray-700 font-mono">,</kbd> to add it. Paste a list to add many at once.
+            Every tag in a row gets that row's value.
+        </p>
+        <div id="multiRows" class="grid grid-cols-[1fr_14rem_2rem] gap-x-3 gap-y-2 items-start">
+            <div class="text-xs text-gray-500 dark:text-gray-400">Keys (tags)</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400">Value</div>
+            <div></div>
         </div>
-        <div class="flex-1 min-w-40">
-            <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Value</label>
-            <input type="text" name="value" required placeholder="e.g. Hu Tao"
-                   class="w-full px-3 py-2 text-sm rounded-lg transition-colors
-                          border border-gray-200 dark:border-gray-600
-                          bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100
-                          placeholder-gray-400 dark:placeholder-gray-500
-                          focus:bg-white dark:focus:bg-gray-700
-                          focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent">
-        </div>
-        <button type="submit"
-                class="px-4 py-2 text-sm font-bold text-white rounded-xl transition-all"
-                style="background: linear-gradient(135deg, #00bed4, #4d0094)">
-            Add
+        <button type="button" id="multiAddRow"
+                class="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-cyan-600 dark:text-cyan-400 hover:underline">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+            </svg>
+            Add another value
         </button>
-    </form>
+        <div class="flex flex-wrap items-center justify-between gap-3 mt-4 pt-4 border-t border-gray-100 dark:border-gray-700/60">
+            <div class="flex flex-wrap items-center gap-2 text-xs">
+                <div id="multiSummary" class="flex flex-wrap gap-2"></div>
+                <span id="multiStatus" class="hidden"></span>
+            </div>
+            <div class="flex gap-2">
+                <button type="button" id="multiClear"
+                        class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300
+                               bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600
+                               rounded-lg transition-colors">
+                    Clear
+                </button>
+                <button type="button" id="multiSave"
+                        class="px-4 py-2 text-sm font-bold text-white rounded-xl transition-all disabled:opacity-40"
+                        style="background: linear-gradient(135deg, #00bed4, #4d0094)">
+                    Save
+                </button>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 </div>
 
 <!-- Search row -->
@@ -224,6 +293,9 @@
 </div>
 {% endif %}
 
+{% if all_data is not none %}
+<script type="application/json" id="cfgExisting">{{ all_data | tojson }}</script>
+{% endif %}
 </div><!-- /data-live-content (dict) -->
 
 
@@ -234,24 +306,32 @@
 
 <!-- Add item form -->
 <div class="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700/60 px-5 py-4 mb-4">
-    <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Add Item</p>
-    <form method="post" action="/configs/{{ config_name }}/add" class="flex items-end gap-3">
-        <div class="flex-1">
-            <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Value</label>
-            <input type="text" name="item" required placeholder="e.g. genshin_impact"
-                   class="w-full px-3 py-2 text-sm rounded-lg transition-colors font-mono
-                          border border-gray-200 dark:border-gray-600
-                          bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100
-                          placeholder-gray-400 dark:placeholder-gray-500
-                          focus:bg-white dark:focus:bg-gray-700
-                          focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent">
+    <p class="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">{{ "Add Item" if config_meta.auto_generated else "Add Items" }}</p>
+    {% if config_meta.auto_generated %}
+    {{ single_item_form() }}
+    {% else %}
+    <noscript>
+    {{ single_item_form() }}
+    </noscript>
+    <div id="multiAdd" class="hidden">
+        <p class="text-xs text-gray-400 dark:text-gray-500 -mt-2 mb-3">
+            Type a tag and press <kbd class="px-1 rounded bg-gray-100 dark:bg-gray-700 font-mono">Enter</kbd> or
+            <kbd class="px-1 rounded bg-gray-100 dark:bg-gray-700 font-mono">,</kbd>, or paste a list (one per line or comma separated).
+        </p>
+        <div class="flex items-start gap-3">
+            <div id="multiRows" class="flex-1"></div>
+            <button type="button" id="multiSave"
+                    class="px-4 py-2 text-sm font-bold text-white rounded-xl transition-all whitespace-nowrap disabled:opacity-40"
+                    style="background: linear-gradient(135deg, #00bed4, #4d0094)">
+                Add
+            </button>
         </div>
-        <button type="submit"
-                class="px-4 py-2 text-sm font-bold text-white rounded-xl transition-all"
-                style="background: linear-gradient(135deg, #00bed4, #4d0094)">
-            Add
-        </button>
-    </form>
+        <div class="flex flex-wrap items-center gap-2 text-xs mt-3">
+            <div id="multiSummary" class="flex flex-wrap gap-2"></div>
+            <span id="multiStatus" class="hidden"></span>
+        </div>
+    </div>
+    {% endif %}
 </div>
 
 <!-- Search -->
@@ -319,6 +399,9 @@
     {% endif %}
 </div>
 
+{% if all_data is not none %}
+<script type="application/json" id="cfgExisting">{{ all_data | tojson }}</script>
+{% endif %}
 </div><!-- /data-live-content (list) -->
 
 
@@ -404,7 +487,7 @@
 <dialog id="bulkDialog" class="rounded-2xl shadow-2xl border-0 p-0 w-full max-w-2xl bg-white dark:bg-gray-800">
     <div class="p-6">
         <div class="flex items-center justify-between mb-4">
-            <h3 class="text-sm font-semibold text-gray-900 dark:text-gray-100">Bulk import from JSON</h3>
+            <h3 id="bulkTitle" class="text-sm font-semibold text-gray-900 dark:text-gray-100">Bulk import from JSON</h3>
             <button type="button" onclick="document.getElementById('bulkDialog').close()"
                     class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-lg leading-none">&times;</button>
         </div>
@@ -533,6 +616,7 @@
                 var doc = new DOMParser().parseFromString(html, 'text/html');
                 var fresh = doc.querySelector('[data-live-content]');
                 if (fresh) liveContent.innerHTML = fresh.innerHTML;
+                document.dispatchEvent(new Event('cfg:refreshed'));
             });
     }
 
@@ -590,8 +674,286 @@
         });
     });
 
-    // --- Bulk import from JSON (dict only) ---------------------------------
     var bulkDialog = document.getElementById('bulkDialog');
+
+    // --- Multi-add form (dict + list, hidden for auto-generated configs) ----
+    // Tags become chips; each chip is checked against the full file, which the
+    // page embeds as #cfgExisting inside the live-refreshed region.
+    var multiAdd = null;
+    var multiEl = document.getElementById('multiAdd');
+    if (multiEl) {
+        multiEl.classList.remove('hidden');
+        var isDict = {{ 'true' if config_meta.type == 'dict' else 'false' }};
+        var base = "/configs/{{ config_name }}";
+        var rowsEl = document.getElementById('multiRows');
+        var saveBtn = document.getElementById('multiSave');
+        var statusEl = document.getElementById('multiStatus');
+        var rows = [];
+
+        var CHIP = {
+            add:  'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-700/50',
+            over: 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-600/60',
+            same: 'bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-600 line-through',
+            dup:  'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 border-red-300 dark:border-red-600/60',
+        };
+        var PILL = {
+            add:  'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
+            over: 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
+            same: 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400',
+            dup:  'bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300',
+        };
+
+        function existing() {
+            var el = document.getElementById('cfgExisting');
+            return el ? JSON.parse(el.textContent) : (isDict ? {} : []);
+        }
+
+        function splitTags(text) {
+            return text.split(/[\n,]+/).map(function (t) { return t.trim(); }).filter(Boolean);
+        }
+
+        function showStatus(text, isError) {
+            statusEl.textContent = text;
+            statusEl.className = 'font-medium ' + (isError ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400');
+        }
+        function hideStatus() { statusEl.className = 'hidden'; }
+
+        function makeRow() {
+            var row = { keys: [] };
+            row.box = document.createElement('div');
+            row.box.className = 'flex flex-wrap items-center gap-1.5 min-h-[2.5rem] px-2 py-1.5 rounded-lg cursor-text ' +
+                'border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 ' +
+                'focus-within:bg-white dark:focus-within:bg-gray-700 focus-within:ring-2 focus-within:ring-pink-400 focus-within:border-transparent';
+            row.input = document.createElement('input');
+            row.input.type = 'text';
+            row.input.className = 'flex-1 min-w-[8rem] py-0.5 bg-transparent text-sm font-mono text-gray-900 dark:text-gray-100 ' +
+                'placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none';
+            row.placeholder = isDict ? 'e.g. hu_tao_(genshin_impact)' : 'e.g. genshin_impact';
+            row.box.appendChild(row.input);
+            row.box.addEventListener('click', function (e) { if (e.target === row.box) row.input.focus(); });
+
+            row.input.addEventListener('keydown', function (e) {
+                if ((e.key === 'Enter' || e.key === ',') && row.input.value.trim()) {
+                    e.preventDefault();
+                    commit(row);
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                } else if (e.key === 'Backspace' && !row.input.value && row.keys.length) {
+                    row.keys.pop();
+                    render();
+                }
+            });
+            row.input.addEventListener('paste', function (e) {
+                var tags = splitTags(e.clipboardData.getData('text'));
+                if (tags.length > 1) {
+                    e.preventDefault();
+                    row.keys.push.apply(row.keys, tags);
+                    render();
+                }
+            });
+
+            if (isDict) {
+                row.value = document.createElement('input');
+                row.value.type = 'text';
+                row.value.placeholder = 'e.g. Hu Tao';
+                row.value.className = 'w-full px-3 py-2 text-sm rounded-lg transition-colors ' +
+                    'border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 ' +
+                    'placeholder-gray-400 dark:placeholder-gray-500 focus:bg-white dark:focus:bg-gray-700 ' +
+                    'focus:outline-none focus:ring-2 focus:ring-pink-400 focus:border-transparent';
+                row.value.addEventListener('input', render);
+                row.remove = document.createElement('button');
+                row.remove.type = 'button';
+                row.remove.title = 'Remove row';
+                row.remove.innerHTML = '&times;';
+                row.remove.className = 'h-10 text-lg text-gray-400 hover:text-red-500 transition-colors';
+                row.remove.addEventListener('click', function () {
+                    rows.splice(rows.indexOf(row), 1);
+                    row.box.remove(); row.value.remove(); row.remove.remove();
+                    if (!rows.length) makeRow();
+                    render();
+                });
+                rowsEl.append(row.box, row.value, row.remove);
+            } else {
+                rowsEl.appendChild(row.box);
+            }
+            rows.push(row);
+            return row;
+        }
+
+        function commit(row) {
+            var tags = splitTags(row.input.value);
+            row.input.value = '';
+            if (tags.length) { row.keys.push.apply(row.keys, tags); render(); }
+        }
+
+        // Classify every chip and return what a save would write.
+        function classify() {
+            var current = existing();
+            var currentSet = isDict ? null : new Set(current);
+            var seen = {}, counts = { add: 0, over: 0, same: 0, dup: 0 }, out = [];
+            rows.forEach(function (row) {
+                var value = isDict ? row.value.value.trim() : null;
+                row.states = row.keys.map(function (key) {
+                    var state;
+                    if (seen[key]) state = 'dup';
+                    else if (isDict ? !(key in current) : !currentSet.has(key)) state = 'add';
+                    else if (!isDict || String(current[key]) === value) state = 'same';
+                    else state = 'over';
+                    seen[key] = true;
+                    counts[state]++;
+                    if (state === 'add' || state === 'over') out.push({ key: key, value: value, row: row });
+                    return { state: state, old: isDict && key in current ? String(current[key]) : null };
+                });
+            });
+            return { counts: counts, out: out };
+        }
+
+        function render() {
+            var result = classify();
+            rows.forEach(function (row) {
+                row.input.placeholder = row.keys.length ? '' : row.placeholder;
+                Array.from(row.box.querySelectorAll('.chip')).forEach(function (c) { c.remove(); });
+                row.keys.forEach(function (key, i) {
+                    var st = row.states[i];
+                    var chip = document.createElement('span');
+                    chip.className = 'chip inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md border text-xs font-mono ' + CHIP[st.state];
+                    var label = document.createElement('span');
+                    label.textContent = key;
+                    chip.appendChild(label);
+                    if (st.state === 'over') {
+                        var was = document.createElement('span');
+                        was.className = 'font-sans opacity-80';
+                        was.textContent = '· was ' + st.old;
+                        chip.appendChild(was);
+                    }
+                    chip.title = {
+                        add: 'New',
+                        over: 'Currently ' + st.old + ' — saving asks before overwriting',
+                        same: isDict ? 'Already maps to this value — skipped' : 'Already in the list — skipped',
+                        dup: 'Entered twice — only the first is used',
+                    }[st.state];
+                    var x = document.createElement('button');
+                    x.type = 'button';
+                    x.className = 'px-0.5 opacity-60 hover:opacity-100';
+                    x.innerHTML = '&times;';
+                    x.addEventListener('click', function () { row.keys.splice(i, 1); render(); });
+                    chip.appendChild(x);
+                    row.box.insertBefore(chip, row.input);
+                });
+            });
+
+            var summary = document.getElementById('multiSummary');
+            summary.innerHTML = '';
+            var c = result.counts;
+            [['add', c.add + ' new'],
+             ['over', c.over + ' overwrite' + (c.over === 1 ? '' : 's') + ' — you\'ll confirm on save'],
+             ['same', c.same + (isDict ? ' unchanged' : ' already in list')],
+             ['dup', c.dup + ' duplicate' + (c.dup === 1 ? '' : 's')]].forEach(function (p) {
+                if (!c[p[0]]) return;
+                var pill = document.createElement('span');
+                pill.className = 'px-2 py-0.5 rounded-full font-semibold ' + PILL[p[0]];
+                pill.textContent = p[1];
+                summary.appendChild(pill);
+            });
+
+            var n = result.out.length;
+            saveBtn.textContent = isDict
+                ? (n ? 'Save ' + n + ' entr' + (n === 1 ? 'y' : 'ies') : 'Save')
+                : (n ? 'Add ' + n + ' item' + (n === 1 ? '' : 's') : 'Add');
+            return result;
+        }
+
+        function reset() {
+            rows.forEach(function (row) {
+                row.box.remove();
+                if (row.value) { row.value.remove(); row.remove.remove(); }
+            });
+            rows = [];
+            makeRow();
+            render();
+        }
+
+        function post(path, params) {
+            return fetch(base + path, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: params,
+            }).then(function (r) {
+                return r.json().then(function (j) { return { ok: r.ok, body: j }; });
+            });
+        }
+
+        multiAdd = {
+            pending: false,
+            saved: function (n) {
+                multiAdd.pending = false;
+                reset();
+                showStatus('Saved ' + n + ' entr' + (n === 1 ? 'y' : 'ies') + '.');
+            },
+        };
+
+        function save() {
+            rows.forEach(commit);
+            hideStatus();
+            var result = render();
+
+            if (isDict) {
+                var missing = rows.filter(function (row) { return row.keys.length && !row.value.value.trim(); });
+                if (missing.length) { missing[0].value.focus(); showStatus('Every row with tags needs a value.', true); return; }
+                var keyless = rows.filter(function (row) { return !row.keys.length && row.value.value.trim(); });
+                if (keyless.length) { keyless[0].input.focus(); showStatus('Every row with a value needs at least one tag.', true); return; }
+            }
+            if (!result.out.length) { showStatus('Nothing new to save.', true); return; }
+
+            saveBtn.disabled = true;
+            var done = function () { saveBtn.disabled = false; };
+
+            if (!isDict) {
+                var params = new URLSearchParams();
+                result.out.forEach(function (o) { params.append('items', o.key); });
+                post('/add-items', params).then(function (res) {
+                    if (!res.ok) { showStatus(res.body.error || 'Save failed.', true); return; }
+                    reset();
+                    refreshContent();
+                    showStatus('Added ' + res.body.added + ' item' + (res.body.added === 1 ? '' : 's') + '.');
+                }).catch(function () { showStatus('Network error while saving.', true); }).finally(done);
+                return;
+            }
+
+            // Dict: same preview/apply endpoints as Bulk import JSON. New keys
+            // are written straight away; any overwrite goes through its review.
+            var obj = {};
+            result.out.forEach(function (o) { obj[o.key] = o.value; });
+            var content = JSON.stringify(obj);
+            post('/bulk-preview', new URLSearchParams({ content: content })).then(function (res) {
+                if (!res.ok) { showStatus(res.body.error || 'Save failed.', true); return; }
+                if (res.body.conflict_count) {
+                    multiAdd.pending = true;
+                    bulkDialog.review(content, res.body);
+                    return;
+                }
+                return post('/bulk-apply', new URLSearchParams({ content: content })).then(function (applied) {
+                    if (!applied.ok) { showStatus(applied.body.error || 'Save failed.', true); return; }
+                    refreshContent();
+                    multiAdd.saved(applied.body.added);
+                });
+            }).catch(function () { showStatus('Network error while saving.', true); }).finally(done);
+        }
+
+        saveBtn.addEventListener('click', save);
+        var addRowBtn = document.getElementById('multiAddRow');
+        if (addRowBtn) addRowBtn.addEventListener('click', function () { makeRow().input.focus(); render(); });
+        var clearBtn = document.getElementById('multiClear');
+        if (clearBtn) clearBtn.addEventListener('click', function () { hideStatus(); reset(); });
+        if (bulkDialog) bulkDialog.addEventListener('close', function () { multiAdd.pending = false; });
+        // Edits, deletes and saves re-render #cfgExisting; re-check the chips against it.
+        document.addEventListener('cfg:refreshed', render);
+
+        makeRow();
+        render();
+    }
+
+    // --- Bulk import from JSON (dict only) ---------------------------------
     if (bulkDialog) {
         var bulkBase = "/configs/{{ config_name }}";
         var inputStep = document.getElementById('bulkInputStep');
@@ -697,11 +1059,25 @@
             previewStep.classList.remove('hidden');
         }
 
+        // Lets the multi-add form hand its entries to the review step.
+        var bulkTitle = document.getElementById('bulkTitle');
+        bulkDialog.review = function (content, data) {
+            bulkTitle.textContent = 'Confirm overwrites';
+            jsonEl.value = content;
+            renderBulkPreview(data);
+            bulkDialog.showModal();
+        };
+
         document.getElementById('bulkImportBtn').addEventListener('click', function () {
+            bulkTitle.textContent = 'Bulk import from JSON';
             resetBulk();
             bulkDialog.showModal();
         });
-        document.getElementById('bulkBackBtn').addEventListener('click', resetBulk);
+        document.getElementById('bulkBackBtn').addEventListener('click', function () {
+            // From the multi-add form there is no JSON step to go back to.
+            if (multiAdd && multiAdd.pending) bulkDialog.close();
+            else resetBulk();
+        });
 
         document.getElementById('bulkPreviewBtn').addEventListener('click', function () {
             errEl.classList.add('hidden');
@@ -737,11 +1113,13 @@
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: params,
             }).then(function (r) { return r.json(); })
-              .then(function () {
+              .then(function (res) {
+                  var fromMultiAdd = multiAdd && multiAdd.pending;
                   bulkDialog.close();
                   jsonEl.value = '';
                   resetBulk();
                   refreshContent();
+                  if (fromMultiAdd) multiAdd.saved(res.added + res.overwritten);
               })
               .catch(function () { showBulkError('Network error while applying.'); })
               .finally(function () { btn.disabled = false; });

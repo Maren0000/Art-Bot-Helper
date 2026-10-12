@@ -566,6 +566,13 @@ async def delete_image(image_id: int, request: Request):
 # ---------------------------------------------------------------------------
 
 
+def _multi_add_data(meta: dict, data):
+    """The whole file, embedded in the page so the multi-add form can flag
+    existing keys as you type. Auto-generated maps (char_map) keep the
+    single-entry form: they are large and edits are overwritten anyway."""
+    return None if meta.get("auto_generated") else data
+
+
 def _config_ctx(name: str, extra: dict) -> dict:
     return {"active_page": "configs", "db_path": DB_PATH,
             "config_name": name, "config_meta": CONFIGS[name], **extra}
@@ -617,6 +624,7 @@ async def config_view(
         ctx = _config_ctx(name, {
             "entries": page_entries, "total": total, "total_count": len(data),
             "page": page, "total_pages": total_pages, "search": search, "saved": saved,
+            "all_data": _multi_add_data(meta, data),
         })
     elif meta["type"] == "list":
         items = data
@@ -625,6 +633,7 @@ async def config_view(
             items = [i for i in items if sl in i.lower()]
         ctx = _config_ctx(name, {
             "items": items, "total": len(data), "search": search, "saved": saved,
+            "all_data": _multi_add_data(meta, data),
         })
     else:
         ctx = _config_ctx(name, {
@@ -648,6 +657,24 @@ async def config_add(name: str, key: str = Form(""), value: str = Form(""), item
         data.append(item.strip())
         save_config(name, data)
     return RedirectResponse(f"/configs/{name}?saved=1", status_code=303)
+
+
+@app.post("/configs/{name}/add-items", dependencies=[Depends(require_auth)])
+async def config_add_items(request: Request, name: str):
+    """Append several items to a list config at once; existing ones are skipped."""
+    if name not in CONFIGS or CONFIGS[name]["type"] != "list" or name in SETTINGS_FILES:
+        raise HTTPException(status_code=404)
+    form = await request.form()
+    data = load_config(name)
+    added = 0
+    for raw in form.getlist("items"):
+        item = str(raw).strip()
+        if item and item not in data:
+            data.append(item)
+            added += 1
+    if added:
+        save_config(name, data)
+    return JSONResponse({"added": added})
 
 
 @app.post("/configs/{name}/edit", dependencies=[Depends(require_auth)])
