@@ -158,7 +158,6 @@ class PostingCog(commands.Cog):
                 if series_pixiv:
                     series = series_pixiv
 
-            # Anime forums are threaded by series, so their "characters" are series names.
             thread_names, series = resolve_destination(charas, series, anime)
             characters = ",".join(thread_names)
 
