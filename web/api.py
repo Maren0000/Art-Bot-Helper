@@ -385,9 +385,6 @@ async def api_submit(request: Request):
             charas_extra, series_extra, anime_extra = posting.tags_text_pass(_bot.config, post_data.get("text", ""))
         if series_extra:
             series = series_extra
-        # "characters" holds the thread names to post to, which for an anime
-        # forum are series names. The field keeps its name so older
-        # userscripts keep working.
         thread_names, series = posting.resolve_destination(
             charas_model | charas_extra, series, anime | anime_extra,
         )

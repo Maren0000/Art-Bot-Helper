@@ -18,8 +18,6 @@ from base64 import b64encode
 import exception
 from utils import bluesky_get, compute_hashes, detect_platform, imagehash, pixiv_ajax_get
 
-# Anime forums are named anime-{safety} and hold one thread per series, unlike
-# the gacha {series}-{safety} forums which hold one thread per character.
 ANIME_SERIES = "anime"
 
 
@@ -209,14 +207,6 @@ def tags_text_pass(config, text: str) -> tuple[set, str, set]:
 
 
 def resolve_destination(characters: set, series: str, anime: set) -> tuple[set, str]:
-    """Pick the thread names and forum series to post to.
-
-    A gacha series wins over anime: series with both a game and an anime are
-    filed under whichever is the original media, and that call is made by
-    putting the tag in series_map or anime_map. If both still match (a
-    crossover), the gacha forum is the more specific home. The confirm step
-    lets the poster switch forums by hand.
-    """
     if series or not anime:
         return characters, series
     return anime, ANIME_SERIES
@@ -427,15 +417,6 @@ async def find_character_threads(forum_channel: discord.ForumChannel, characters
 
 
 async def find_series_threads(forum_channel: discord.ForumChannel, series: str, on_status=None) -> list:
-    """
-    Find the series threads in an anime forum.
-
-    Anime forums have one thread per series and no "All Characters" or group
-    threads, so this is a plain name lookup.
-
-    Raises:
-        ThreadsNotFound: If any series thread is missing
-    """
     wanted = list(dict.fromkeys(
         name.strip() for name in series.lower().replace("_", " ").split(",") if name.strip()
     ))
@@ -468,7 +449,6 @@ async def find_series_threads(forum_channel: discord.ForumChannel, series: str, 
 
 
 async def find_threads(forum_channel: discord.ForumChannel, names: str, on_status=None) -> list:
-    """Find the threads to post to: series threads in anime forums, character threads otherwise."""
     if is_anime_forum(forum_channel):
         return await find_series_threads(forum_channel, names, on_status=on_status)
     threads, _, _ = await find_character_threads(forum_channel, names, on_status=on_status)

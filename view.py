@@ -120,7 +120,6 @@ class AutoPostView(BaseView):
         self.selected_forum = await forum_choice.values[0].fetch()
 
         embed = interaction.message.embeds[0]
-        # Switching between gacha and anime forums changes what the first field holds.
         embed.set_field_at(index=0, name=_threads_label(self.selected_forum), value=embed.fields[0].value, inline=False)
         embed.set_field_at(index=1, name="Forum Overriden", value=self.selected_forum.mention, inline=False)
         await interaction.response.edit_message(embed=embed)

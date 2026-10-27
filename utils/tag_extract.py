@@ -24,13 +24,6 @@ CATEGORY_CHARACTER = 4
 
 USER_AGENT = "Art-Bot-Helper/1.0"
 
-# Danbooru intermittently answers 500/502/503 under load, and a full rebuild
-# makes hundreds of paginated requests, so a single transient failure used to
-# throw away the whole run. Retry those (and dropped connections / read
-# timeouts) with exponential backoff -- 0s, 2s, 4s, 8s, 16s -- honouring
-# Retry-After on 429/503. raise_on_status=False hands the final response back
-# so callers' raise_for_status() still reports the real status once retries
-# run out.
 DANBOORU_RETRY = Retry(
     total=5,
     backoff_factor=1,
