@@ -19,6 +19,7 @@ from tortoise.functions import Count
 
 # Allow importing db.models when running standalone (outside the project root).
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from db.db import add_missing_columns  # noqa: E402
 from db.models import Image  # noqa: E402
 from web.oidc import OIDCClient, OIDCError, OIDCSettings, TX_COOKIE, TX_TTL  # noqa: E402
 
@@ -159,6 +160,8 @@ async def lifespan(_: FastAPI):
         conn = Tortoise.get_connection("default")
         await conn.execute_query("PRAGMA foreign_keys = ON;")
         await conn.execute_query("PRAGMA journal_mode = WAL;")
+        await Tortoise.generate_schemas()
+        await add_missing_columns(conn)
     yield
     if _tortoise_owned:
         await Tortoise.close_connections()
@@ -534,6 +537,7 @@ async def images_page(
                     "guild_id": r.guild_id,
                     "thread_id": r.thread_id,
                     "message_id": r.message_id,
+                    "uploaded": r.uploaded,
                     "posted_at": r.posted_at.strftime("%Y-%m-%d %H:%M:%S") if r.posted_at else "",
                 }
                 for r in rows

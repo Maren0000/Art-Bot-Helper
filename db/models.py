@@ -9,6 +9,7 @@ class Image(models.Model):
     guild_id = fields.BigIntField()  # Discord server ID
     thread_id = fields.BigIntField()  # Thread where first posted
     message_id = fields.BigIntField()  # Message ID of the post
+    uploaded = fields.BooleanField(null=True)
     posted_at = fields.DatetimeField(auto_now_add=True)
 
     class Meta:

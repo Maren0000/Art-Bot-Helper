@@ -455,7 +455,7 @@ async def find_threads(forum_channel: discord.ForumChannel, names: str, on_statu
     return threads
 
 
-async def store_image_hash(bot, hashes: dict, link: str, platform: str, guild_id: int, thread_id: int, message_id: int):
+async def store_image_hash(bot, hashes: dict, link: str, platform: str, guild_id: int, thread_id: int, message_id: int, uploaded: bool | None = None):
     """Store image hashes in database for duplicate detection. Returns the created Image."""
     return await bot.db.add_image(
         phash=hashes["phash"],
@@ -465,14 +465,20 @@ async def store_image_hash(bot, hashes: dict, link: str, platform: str, guild_id
         guild_id=guild_id,
         thread_id=thread_id,
         message_id=message_id,
+        uploaded=uploaded,
     )
 
 
 async def send_webhook(bot, embed, post: discord.Message, channel_name: str, link: str):
-    if channel_name in bot.config.webhooks:
+    if channel_name not in bot.config.webhooks:
+        return
+    if isinstance(embed, str):
+        payload = {"content": embed}
+    else:
         embed.set_image(url=post.embeds[0].image.url)
-        for webhook_url in bot.config.webhooks[channel_name]:
-            await bot.client.post(webhook_url, data={"payload_json": json.dumps({"content": f"<{link}>", "embeds": [embed.to_dict()]})})
+        payload = {"content": f"<{link}>", "embeds": [embed.to_dict()]}
+    for webhook_url in bot.config.webhooks[channel_name]:
+        await bot.client.post(webhook_url, data={"payload_json": json.dumps(payload)})
 
 
 async def create_embed_and_send(bot, link: str, post_data: dict, threads: list, poster_name: str, guild_id: int, channel_name: str, embed_fallback: bool, hq_image: bytes, image_name: str, hashes: dict, image_num: int | None = None, platform: str = "pixiv", on_status=None) -> tuple[str, int | None]:
@@ -555,6 +561,7 @@ async def create_embed_and_send(bot, link: str, post_data: dict, threads: list, 
             guild_id=guild_id,
             thread_id=first_post.channel.id,
             message_id=first_post.id,
+            uploaded=not embed_fallback,
         )
         post_id = image.id
 

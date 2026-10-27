@@ -10,6 +10,13 @@ def _hamming_distance(h1: str, h2: str) -> int:
     return imagehash.hex_to_hash(h1) - imagehash.hex_to_hash(h2)
 
 
+async def add_missing_columns(conn) -> None:
+    _, rows = await conn.execute_query("PRAGMA table_info(images);")
+    columns = {row["name"] for row in rows}
+    if "uploaded" not in columns:
+        await conn.execute_script("ALTER TABLE images ADD COLUMN uploaded INT;")
+
+
 class Database:
     _hash_cache: dict[str, int] | None = None  # phash -> image_id
 
@@ -27,6 +34,7 @@ class Database:
         await conn.execute_query("PRAGMA journal_mode = WAL;")
 
         await Tortoise.generate_schemas()
+        await add_missing_columns(conn)
         await self.load_hashes()
 
     async def load_hashes(self):
@@ -67,6 +75,7 @@ class Database:
         guild_id: int,
         thread_id: int,
         message_id: int,
+        uploaded: bool | None = None,
     ) -> Image:
         """Store a new image hash and add to cache."""
         image = await Image.create(
@@ -77,6 +86,7 @@ class Database:
             guild_id=guild_id,
             thread_id=thread_id,
             message_id=message_id,
+            uploaded=uploaded,
         )
         
         # Add to cache for future lookups
